@@ -22,11 +22,11 @@ $ pip install pycoinnet
 Nothing here really pycoinnet-specific except the dependancy on pycoin.
 
 
-Test
-----
+Try It
+------
 
 ```
-$ python examples/address_keeper.py SOME_IP_RUNNING_BITCOIND
+$ python examples/address_keeper.py
 ```
 
 This example will connect, fetch a list of peers, and keep it groomed in a text file called addresses.txt. Check the source for more info.
@@ -43,7 +43,7 @@ There is not much built-in support for persistent storage for now beyond the "ad
 Donate
 ------
 
-Want to donate? Feel free. Send to 1KissEskteXTAXbh17qJYLtMes1B6kJxZj.
+Want to donate? Feel free. Send to 1KissEskteXTAXbh17qJYLtMes1B6kJxZj. Or hire me to do bitcoin consulting... him@richardkiss.com.
 
 
 [pycoin]: https://github.com/richardkiss/pycoin

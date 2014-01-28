@@ -1,173 +1,124 @@
-import asyncio
+import asyncio.queues
 import binascii
-import datetime
-import io
 import logging
-import os
 import struct
 import time
 
+from pycoin import encoding
 from pycoin.serialize import bitcoin_streamer
-from pycoinnet.BitcoinPeerStreamReader import BitcoinPeerStreamReader
-from pycoinnet.reader import init_bitcoin_streamer
-from pycoinnet.reader.PeerAddress import PeerAddress
 
-init_bitcoin_streamer()
+from pycoinnet.BitcoinProtocolMessage import BitcoinProtocolMessage
+from pycoinnet.PeerAddress import PeerAddress
+
+
+class BitcoinProtocolError(Exception):
+    pass
 
 
 class BitcoinPeerProtocol(asyncio.Protocol):
 
+    def __init__(self, magic_header=binascii.unhexlify('0B110907'), *args, **kwargs):
+        super(BitcoinPeerProtocol, self).__init__(*args, **kwargs)
+        self.magic_header = magic_header
+
     def connection_made(self, transport):
         logging.debug("connection made %s", transport)
         self.transport = transport
-        self.stream = BitcoinPeerStreamReader()
-        self._request_handle = asyncio.Task(self.start())
+        self.reader = asyncio.StreamReader()
+        self.messages = asyncio.queues.Queue()
+        self.last_message_timestamp = time.time()
+        self._request_handle = asyncio.async(self.start())
 
     def data_received(self, data):
-        self.stream.feed_data(data)
+        self.reader.feed_data(data)
 
-    def write_message(self, message_type, message_data=b''):
-        packet = self.stream.packet_for_message(message_type, message_data)
-        logging.debug("sending message %s [%d bytes]", message_type, len(packet))
+    def send_message(self, message_type, message_data=b''):
+        message_type_padded = (message_type+(b'\0'*12))[:12]
+        message_size = struct.pack("<L", len(message_data))
+        message_checksum = encoding.double_sha256(message_data)[:4]
+        packet = b"".join([self.magic_header, message_type_padded, message_size, message_checksum, message_data])
+        logging.debug("sending message %s [%d bytes]", message_type.decode("utf8"), len(packet))
         self.transport.write(packet)
-
-    def get_msg_version_parameters_default(self):
-        # this must return a dictionary with:
-        #  version (integer)
-        #  subversion (bytes, like b"/Satoshi:0.7.2/")
-        #  node_type (must be 1)
-        #  current time (seconds since epoch)
-        #  remote_address
-        #  remote_listen_port
-        #  local_address
-        #  local_listen_port
-        #  nonce (32 bit)
-        #  last_block_index
-        remote_address, remote_port = self.transport.get_extra_info("socket").getpeername()
-        return dict(
-            version=70001,
-            subversion=b"/Notoshi/",
-            node_type=1,
-            current_time=int(time.time()),
-            remote_address=remote_address,
-            remote_listen_port=remote_port,
-            local_address="127.0.0.1",
-            local_listen_port=6111,
-            nonce=struct.unpack("!Q", os.urandom(8))[0],
-            last_block_index=0,
-        )
-
-    def get_msg_version_parameters(self):
-        return {}
 
     @asyncio.coroutine
     def start(self):
-        d = self.get_msg_version_parameters_default()
-        d.update(self.get_msg_version_parameters())
-        self.send_msg_version(**d)
-
-        self.ping_nonce_handle_lookup = {}
         while True:
-            # schedule ping
             try:
-                ping_handle = asyncio.get_event_loop().call_later(60, self.do_ping)
                 yield from self.parse_next_message()
-                ping_handle.cancel()
+                self.last_message_timestamp = time.time()
             except Exception:
                 logging.exception("message parse failed")
 
+    MAX_MESSAGE_SIZE = 20*1024*1024
+
+    @asyncio.coroutine
     def parse_next_message(self):
-        message_name, message_data = yield from self.stream.readmessage()
+
+        # read magic header
+        reader = self.reader
+        blob = yield from reader.readexactly(len(self.magic_header))
+        if blob != self.magic_header:
+            s = "bad magic: got %s" % binascii.hexlify(blob)
+            logging.error(s)
+            raise BitcoinProtocolError(s)
+
+        # read message name
+        message_name_bytes = yield from reader.readexactly(12)
+        message_name = message_name_bytes.replace(b"\0", b"").decode("utf8")
+
+        # get size of message
+        size_bytes = yield from reader.readexactly(4)
+        size = int.from_bytes(size_bytes, byteorder="little")
+        if size > self.MAX_MESSAGE_SIZE:
+            raise BitcoinProtocolError("absurdly large message size %d" % size)
+
+        # read the hash, then the message
+        transmitted_hash = yield from reader.readexactly(4)
+        message_data = yield from reader.readexactly(size)
+
+        # check the hash
+        actual_hash = encoding.double_sha256(message_data)[:4]
+        if actual_hash == transmitted_hash:
+            logging.debug("checksum is CORRECT")
+        else:
+            s = "checksum is WRONG: %s instead of %s" % (
+                binascii.hexlify(actual_hash), binascii.hexlify(transmitted_hash))
+            logging.error(s)
+            raise BitcoinProtocolError(s)
 
         logging.debug("message: %s (%d byte payload)", message_name, len(message_data))
 
-        def version_supplement(d):
-            d["when"] = datetime.datetime.fromtimestamp(d["timestamp"])
+        # parse the blob into a BitcoinProtocolMessage object
+        msg = BitcoinProtocolMessage.parse_from_data(message_name, message_data)
+        yield from self.messages.put(msg)
 
-        def alert_supplement(d):
-            d["alert_msg"] = bitcoin_streamer.parse_as_dict(
-                "version relayUntil expiration id cancel setCancel minVer maxVer setSubVer priority comment statusBar reserved".split(),
-                "LQQLLSLLSLSSS",
-                d["payload"])
+    def next_message(self):
+        return self.messages.get()
 
-        PARSE_PAIR = {
-            'version': (
-                "version node_type timestamp remote_address local_address nonce subversion last_block_index",
-                "LQQAAQSL",
-                version_supplement
-            ),
-            'verack': ("", ""),
-            'inv': ("items", "[v]"),
-            'getdata': ("items", "[v]"),
-            'addr': ("date_address_tuples", "[LA]"),
-            'alert': ("payload signature", "SS", alert_supplement),
-            'tx': ("tx", "T"),
-            'block': ("block", "B"),
-            'pong': ("nonce", "L"),
-        }
-
-        the_tuple = PARSE_PAIR.get(message_name)
-        if the_tuple is None:
-            logging.error("unknown message: %s %s", message_name, binascii.hexlify(message_data))
-        else:
-            prop_names, prop_struct = the_tuple[:2]
-            post_f = lambda d: 0
-            if len(the_tuple) > 2:
-                post_f = the_tuple[2]
-            d = bitcoin_streamer.parse_as_dict(prop_names.split(), prop_struct, io.BytesIO(message_data))
-            post_f(d)
-            f = getattr(self, "handle_msg_%s" % message_name)
-            f(**d)
-
-    def do_ping(self):
-        def pong_missing():
-            logging.debug("pong missing with nonce %s, disconnecting", binascii.hexlify(nonce))
-            self.transport.close()
-
-        nonce = os.urandom(8)
-        self.send_msg_ping(nonce)
-        logging.debug("sending ping with nonce %s", binascii.hexlify(nonce))
-        # look for a pong with the given nonce
-        handle = asyncio.get_event_loop().call_later(60, pong_missing)
-        self.ping_nonce_handle_lookup[nonce] = handle
-
-    def handle_msg_pong(self, nonce):
-        logging.debug("got pong with nonce %s", binascii.unhexlify(nonce))
-        if nonce in self.ping_nonce_handle_lookup:
-            logging.debug("canceling hang-up")
-            self.ping_nonce_handle_lookup[nonce].cancel()
-            del self.ping_nonce_handle_lookup[nonce]
-
-    def handle_msg_addr(self, date_address_tuples):
-        logging.info("got addresses %s", str(date_address_tuples))
-
-    def handle_msg_version(self, version, node_type, timestamp, remote_address, local_address, nonce, subversion, last_block_index, when):
-        self.send_msg_verack()
-
-    def handle_msg_verack(self):
-        pass
-
-    def handle_msg_inv(self, items):
-        pass
-
-    def handle_msg_alert(self, payload, signature, alert_msg):
-        pass
-
-    def handle_msg_tx(self, tx):
-        pass
-
-    def send_msg_version(self, version, subversion, node_type, current_time, remote_address, remote_listen_port, local_address, local_listen_port, nonce, last_block_index):
+    def send_msg_version(
+            self, version, subversion, services, current_time, remote_address,
+            remote_listen_port, local_address, local_listen_port, nonce, last_block_index, want_relay):
         remote = PeerAddress(1, remote_address, remote_listen_port)
         local = PeerAddress(1, local_address, local_listen_port)
-        the_bytes = bitcoin_streamer.pack_struct("LQQAAQSL", version, node_type, current_time, remote, local, nonce, subversion, last_block_index)
-        self.write_message(b"version", the_bytes)
+        the_bytes = bitcoin_streamer.pack_struct(
+            "LQQAAQSL", version, services, current_time,
+            remote, local, nonce, subversion, last_block_index)
+        self.send_message(b"version", the_bytes)
 
     def send_msg_verack(self):
-        self.write_message(b"verack", b'')
+        self.send_message(b"verack")
+
+    def send_msg_getaddr(self):
+        self.send_message(b"getaddr")
 
     def send_msg_getdata(self, items):
         the_bytes = bitcoin_streamer.pack_struct("I" + ("v" * len(items)), len(items), *items)
-        self.write_message(b"getdata", the_bytes)
+        self.send_message(b"getdata", the_bytes)
 
     def send_msg_ping(self, nonce):
-        self.write_message(b"ping", nonce)
+        nonce_data = struct.pack("<Q", nonce)
+        self.send_message(b"ping", nonce_data)
+
+    def send_msg_pong(self, nonce):
+        nonce_data = struct.pack("<Q", nonce)
+        self.send_message(b"pong", nonce_data)

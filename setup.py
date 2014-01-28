@@ -7,7 +7,7 @@ version = "0.10"
 setup(
     name="pycoinnet",
     version=version,
-    packages = [
+    packages=[
         "pycoinnet",
     ],
     author="Richard Kiss",
