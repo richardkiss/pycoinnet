@@ -17,6 +17,15 @@ class InvItem(object):
     def __hash__(self):
         return hash(self.data)
 
+    def __eq__(self, other):
+        if isinstance(other, self.__class__):
+            return self.item_type == other.item_type and self.data == other.data
+        else:
+            return False
+
+    def __ne__(self, other):
+        return not self.__eq__(other)
+
     def stream(self, f):
         stream_struct("L#", f, self.item_type, self.data)
 

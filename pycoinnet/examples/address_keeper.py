@@ -13,7 +13,7 @@ import random
 import struct
 import time
 
-from pycoinnet.BitcoinPeerProtocol import BitcoinPeerProtocol
+from pycoinnet.peer.BitcoinPeerProtocol import BitcoinPeerProtocol
 
 
 class AddressDB(object):
