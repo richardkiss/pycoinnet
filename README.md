@@ -15,8 +15,34 @@ Using virtual environments:
 $ NEW_ENV=~/.virtualenv-pycoinnetwork # or whatever path you'd like to use
 $ virtualenv -p python3 $NEW_ENV
 $ source $NEW_ENV/bin/activate
-$ pip install pycoin [pycoin]
-$ pip install pycoinnet
+```
+
+
+Python 3 Broken on Mac OS X Brew
+--------------------------------
+
+On Mac OS X, using brew Python3, I've noticed that virtualenvs do NOT properly
+set up the pip install path, so packages are installed into the global Python3
+installation. This kind of defeats the purpose of virtualenvs!
+
+To fix this, edit the pip files.
+
+```
+$ vi $NEW_ENV/bin/pip*
+```
+
+In all three of these pip files, change ```#!/usr/local/bin/python3``` to ```#!/Users/<whatever>/.virtualenv-pycoinnetwork/env/bin/python3```
+substituting in your actual path to virtualenv python.
+
+
+Install Dependencies
+--------------------
+
+Anyway, now install the dependencies.
+
+```
+$ pip install -r requirements.txt
+$ pip install .
 ```
 
 Nothing here really pycoinnet-specific except the dependancy on pycoin.
@@ -26,10 +52,11 @@ Try It
 ------
 
 ```
-$ python examples/address_keeper.py
+$ python pycoinnet/examples/address_keeper.py
 ```
 
 This example will connect, fetch a list of peers, and keep it groomed in a text file called addresses.txt. Check the source for more info. NOTE: it will probably display a lot of errors when it runs, as most of the initial peers, acquired via DNS, are down.
+
 
 Future Direction
 ----------------

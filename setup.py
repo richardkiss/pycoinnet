@@ -9,6 +9,9 @@ setup(
     version=version,
     packages=[
         "pycoinnet",
+        "pycoinnet.peer",
+        "pycoinnet.peergroup",
+        "pycoinnet.util",
     ],
     author="Richard Kiss",
     author_email="him@richardkiss.com",
