@@ -8,9 +8,7 @@ list of available clients in a text file "addresses".
 import asyncio
 import binascii
 import logging
-import os
 import random
-import struct
 import time
 
 from pycoinnet.peer.BitcoinPeerProtocol import BitcoinPeerProtocol
@@ -40,7 +38,7 @@ class AddressDB(object):
                 "bitseed.xf2.org", "dnsseed.bluematt.me",
                 "seed.bitcoin.sipa.be", "dnsseed.bitcoin.dashjr.org"
             ]:
-                 addresses[(h, 8333)] = 1
+                addresses[(h, 8333)] = 1
         return addresses
 
     def next_address(self):
@@ -72,33 +70,19 @@ class AddressDB(object):
                     "%d/%s/%d\n" % (self.addresses[(host, port)], host, port))
 
 
-def get_msg_version_parameters(transport):
-    # this must return a dictionary with:
-    #  version (integer)
-    #  subversion (bytes, like b"/Satoshi:0.7.2/")
-    #  services (a mask, set to 1 for now)
-    #  current time (seconds since epoch)
-    #  remote_address
-    #  remote_listen_port
-    #  local_address
-    #  local_listen_port
-    #  nonce (32 bit)
-    #  last_block_index
-    remote_address, remote_port = \
-        transport.get_extra_info("socket").getpeername()
-    return dict(
-        version=70001,
-        subversion=b"/Notoshi/",
-        services=1,
-        current_time=int(time.time()),
-        remote_address=remote_address,
-        remote_listen_port=remote_port,
-        local_address="127.0.0.1",
-        local_listen_port=6111,
-        nonce=struct.unpack("!Q", os.urandom(8))[0],
-        last_block_index=0,
-        want_relay=True
-    )
+class AddressKeeper:
+    def __init__(self, peer, address_db):
+        self.address_db = address_db
+        peer.register_delegate(self)
+        self.address_db = address_db
+
+    def handle_msg_addr(self, peer, date_address_tuples):
+        self.address_db.add_addresses(
+            (timestamp, address.ip_address.exploded, address.port)
+            for timestamp, address in date_address_tuples)
+        self.address_db.save()
+        # we got addresses from this client. Exit loop and disconnect
+        peer.stop()
 
 
 @asyncio.coroutine
@@ -106,7 +90,7 @@ def connect_to_remote(event_loop, magic_header, address_db, connections):
     host, port = address_db.next_address()
     logging.info("connecting to %s port %d", host, port)
     try:
-        transport, protocol = yield from event_loop.create_connection(
+        transport, peer = yield from event_loop.create_connection(
             lambda: BitcoinPeerProtocol(magic_header),
             host=host, port=port)
     except Exception:
@@ -117,47 +101,14 @@ def connect_to_remote(event_loop, magic_header, address_db, connections):
 
     try:
         logging.info("connected to %s:%d", host, port)
+        AddressKeeper(peer, address_db)
         address_db.add_address(host, port, int(time.time()))
         connections.add(transport)
-        yield from talk_to_remote(protocol, address_db)
+        peer.run()
     except Exception:
         logging.exception("exception talking to %s:%d", host, port)
     logging.info("done talking to %s:%d", host, port)
     connections.remove(transport)
-
-
-@asyncio.coroutine
-def talk_to_remote(protocol, address_db):
-    try:
-        d = get_msg_version_parameters(protocol.transport)
-        protocol.send_msg_version(**d)
-        message = yield from protocol.next_message()
-        if message.name != 'version':
-            raise Exception("missing version")
-        protocol.send_msg_verack()
-
-        # get address info back
-        protocol.send_msg_getaddr()
-
-        while True:
-            message = yield from protocol.next_message()
-
-            if message.name == 'ping':
-                logging.debug("got ping %s", message.nonce)
-                protocol.send_msg_pong(message.nonce)
-
-            if message.name == 'addr':
-                address_db.add_addresses(
-                    (timestamp, address.ip_address.exploded, address.port)
-                    for timestamp, address in message.date_address_tuples)
-                address_db.save()
-                # we got addresses from this client. Exit loop and disconnect
-                break
-
-    except Exception:
-        logging.exception("exception")
-    logging.info("closing connection")
-    protocol.transport.close()
 
 
 def keep_minimum_connections(event_loop, min_connection_count=4):

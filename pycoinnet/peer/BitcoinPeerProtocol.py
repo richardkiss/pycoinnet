@@ -6,7 +6,6 @@ import struct
 import time
 
 from pycoin import encoding
-from pycoin.serialize import bitcoin_streamer
 
 from pycoinnet.message import parse_from_data, pack_from_data
 from pycoinnet.message import MESSAGE_STRUCTURES
@@ -63,9 +62,12 @@ class BitcoinPeerProtocol(asyncio.Protocol):
         remote_ip, remote_port = self.peername
         remote_addr = PeerAddress(1, remote_ip, remote_port)
         local_addr = PeerAddress(1, "127.0.0.1", 6111)
-        d = dict(version=70001, subversion=b"/Notoshi/", services=1, timestamp=int(time.time()),
-            remote_address=remote_addr, local_address=local_addr, nonce=struct.unpack("!Q", os.urandom(8))[0],
-            last_block_index=0, want_relay=True)
+        d = dict(
+            version=70001, subversion=b"/Notoshi/", services=1, timestamp=int(time.time()),
+            remote_address=remote_addr, local_address=local_addr,
+            nonce=struct.unpack("!Q", os.urandom(8))[0],
+            last_block_index=0, want_relay=True
+        )
         return d
 
     def update_msg_version_parameters(self, d):
@@ -94,7 +96,9 @@ class BitcoinPeerProtocol(asyncio.Protocol):
         message_type_padded = (message_type+(b'\0'*12))[:12]
         message_size = struct.pack("<L", len(message_data))
         message_checksum = encoding.double_sha256(message_data)[:4]
-        packet = b"".join([self.magic_header, message_type_padded, message_size, message_checksum, message_data])
+        packet = b"".join([
+            self.magic_header, message_type_padded, message_size, message_checksum, message_data
+        ])
         logging.debug("sending message %s [%d bytes]", message_type.decode("utf8"), len(packet))
         self.bytes_writ += len(packet)
         self.transport.write(packet)

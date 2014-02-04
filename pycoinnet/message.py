@@ -22,9 +22,10 @@ from pycoinnet.PeerAddress import PeerAddress
 # T: Tx object
 
 MESSAGE_STRUCTURES = {
-    'version':
+    'version': (
         "version:L services:Q timestamp:Q remote_address:A local_address:A"
-        " nonce:Q subversion:S last_block_index:L",
+        " nonce:Q subversion:S last_block_index:L"
+    ),
     'verack': "",
     'addr': "date_address_tuples:[LA]",
     'inv': "items:[v]",
@@ -45,9 +46,10 @@ MESSAGE_STRUCTURES = {
     'filterload': "filter:[1] hash_function_count:L tweak:L flags:1",
     'filteradd': "data:[1]",
     'filterclear': "",
-    'merkleblock':
+    'merkleblock': (
         "version:L prev_block:# merkle_root:# timestamp:L"
-        " bits:L nonce:L total_transactions:L hashes:[#] flags:1",
+        " bits:L nonce:L total_transactions:L hashes:[#] flags:1"
+    ),
     'alert': "payload:S signature:S",
 }
 

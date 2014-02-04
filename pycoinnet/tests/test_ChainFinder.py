@@ -1,15 +1,22 @@
 
 from pycoinnet.util.ChainFinder import ChainFinder
 
+
 class BHO(object):
     def __init__(self, h, previous_block_hash=None, difficulty=10):
         self.h = h
-        self.previous_block_hash = h-1 if previous_block_hash is None else previous_block_hash
+        if previous_block_hash is None:
+            previous_block_hash = h-1
+        self.previous_block_hash = previous_block_hash
         self.difficulty = difficulty
+
     def hash(self):
         return self.h
+
     def __repr__(self):
-        return "<BHO: id:%s parent:%s difficulty:%s>" % (self.h, self.previous_block_hash, self.difficulty)
+        return "<BHO: id:%s parent:%s difficulty:%s>" % \
+            (self.h, self.previous_block_hash, self.difficulty)
+
 
 def do_scramble(items, tfb, dbt):
     import itertools
@@ -24,72 +31,82 @@ def do_scramble(items, tfb, dbt):
         assert cf.trees_from_bottom == tfb
         assert cf.descendents_by_top == dbt
 
+
 def load_items(cf, bhos):
     return cf.load_nodes((bh.h, bh.previous_block_hash) for bh in bhos)
 
+
 def test_basics():
     cf = ChainFinder()
-    assert cf.trees_from_bottom == { }
-    assert cf.descendents_by_top == { }
+    assert cf.trees_from_bottom == {}
+    assert cf.descendents_by_top == {}
     ITEMS = [BHO(i) for i in range(6)]
 
     load_items(cf, [ITEMS[0]])
-    assert cf.trees_from_bottom == { 0: [0, -1]}
-    assert cf.descendents_by_top == { -1: {0}}
+    assert cf.trees_from_bottom == {0: [0, -1]}
+    assert cf.descendents_by_top == {-1: {0}}
 
     load_items(cf, [ITEMS[1]])
-    assert cf.trees_from_bottom == { 1: [1, 0, -1]}
-    assert cf.descendents_by_top == { -1: {1}}
+    assert cf.trees_from_bottom == {1: [1, 0, -1]}
+    assert cf.descendents_by_top == {-1: {1}}
 
     load_items(cf, ITEMS[0:2])
-    assert cf.trees_from_bottom == { 1: [1, 0, -1]}
-    assert cf.descendents_by_top == { -1: {1}}
+    assert cf.trees_from_bottom == {1: [1, 0, -1]}
+    assert cf.descendents_by_top == {-1: {1}}
 
     load_items(cf, [ITEMS[4]])
-    assert cf.trees_from_bottom == { 1: [1, 0, -1], 4: [4, 3]}
-    assert cf.descendents_by_top == { -1: {1}, 3: {4}}
+    assert cf.trees_from_bottom == {1: [1, 0, -1], 4: [4, 3]}
+    assert cf.descendents_by_top == {-1: {1}, 3: {4}}
 
     load_items(cf, [ITEMS[3]])
-    assert cf.trees_from_bottom == { 1: [1, 0, -1], 4: [4, 3, 2]}
-    assert cf.descendents_by_top == { -1: {1}, 2: {4}}
+    assert cf.trees_from_bottom == {1: [1, 0, -1], 4: [4, 3, 2]}
+    assert cf.descendents_by_top == {-1: {1}, 2: {4}}
 
     load_items(cf, [ITEMS[5]])
-    assert cf.trees_from_bottom == { 1: [1, 0, -1], 5: [5, 4, 3, 2]}
-    assert cf.descendents_by_top == { -1: {1}, 2: {5}}
+    assert cf.trees_from_bottom == {1: [1, 0, -1], 5: [5, 4, 3, 2]}
+    assert cf.descendents_by_top == {-1: {1}, 2: {5}}
 
     load_items(cf, [ITEMS[2]])
-    assert cf.trees_from_bottom == { 5: [5, 4, 3, 2, 1, 0, -1] }
-    assert cf.descendents_by_top == { -1: {5} }
+    assert cf.trees_from_bottom == {5: [5, 4, 3, 2, 1, 0, -1]}
+    assert cf.descendents_by_top == {-1: {5}}
 
     do_scramble(ITEMS, cf.trees_from_bottom, cf.descendents_by_top)
 
+
 def test_branch():
     cf = ChainFinder()
-    assert cf.trees_from_bottom == { }
-    assert cf.descendents_by_top == { }
+    assert cf.trees_from_bottom == {}
+    assert cf.descendents_by_top == {}
     ITEMS = [BHO(i) for i in range(7)]
     B301 = BHO(301, 3, 10)
-    B302, B303, B304 = [BHO(i) for i in range(302,305)]
+    B302, B303, B304 = [BHO(i) for i in range(302, 305)]
 
     load_items(cf, [B302])
-    assert cf.trees_from_bottom == { 302: [302, 301]}
-    assert cf.descendents_by_top == { 301: {302}}
+    assert cf.trees_from_bottom == {302: [302, 301]}
+    assert cf.descendents_by_top == {301: {302}}
 
     load_items(cf, [B304])
-    assert cf.trees_from_bottom == { 302: [302, 301], 304: [304, 303]}
-    assert cf.descendents_by_top == { 301: {302}, 303: {304}}
+    assert cf.trees_from_bottom == {302: [302, 301], 304: [304, 303]}
+    assert cf.descendents_by_top == {301: {302}, 303: {304}}
 
     load_items(cf, [B303])
-    assert cf.trees_from_bottom == { 304: [304, 303, 302, 301] }
-    assert cf.descendents_by_top == { 301: {304} }
+    assert cf.trees_from_bottom == {304: [304, 303, 302, 301]}
+    assert cf.descendents_by_top == {301: {304}}
 
     load_items(cf, ITEMS)
-    assert cf.trees_from_bottom == { 6: [6, 5, 4, 3, 2, 1, 0, -1], 304: [304, 303, 302, 301] }
-    assert cf.descendents_by_top == { -1: {6}, 301: {304} }
+    assert cf.trees_from_bottom == {
+        6: [6, 5, 4, 3, 2, 1, 0, -1],
+        304: [304, 303, 302, 301]
+    }
+    assert cf.descendents_by_top == {-1: {6}, 301: {304}}
 
     load_items(cf, [B301])
-    assert cf.trees_from_bottom == { 6: [6, 5, 4, 3, 2, 1, 0, -1], 304: [304, 303, 302, 301, 3, 2, 1, 0, -1] }
-    assert cf.descendents_by_top == { -1: {6, 304} }
+    assert cf.trees_from_bottom == {
+        6: [6, 5, 4, 3, 2, 1, 0, -1],
+        304: [304, 303, 302, 301, 3, 2, 1, 0, -1]
+    }
+    assert cf.descendents_by_top == {-1: {6, 304}}
+
 
 def test_0123():
     I0 = BHO(0)
@@ -98,36 +115,43 @@ def test_0123():
     I3 = BHO(3, 1)
     cf = ChainFinder()
     load_items(cf, [I0, I2, I3, I1])
-    assert cf.trees_from_bottom == { 2: [2, 1, 0, -1], 3: [3, 1, 0, -1] }
-    assert cf.descendents_by_top == { -1: {2,3} }
+    assert cf.trees_from_bottom == {2: [2, 1, 0, -1], 3: [3, 1, 0, -1]}
+    assert cf.descendents_by_top == {-1: {2, 3}}
+
 
 def test_all_orphans():
-    I0 = BHO(0)
     I1 = BHO(1)
     I2 = BHO(2)
     I3 = BHO(3)
     cf = ChainFinder()
     load_items(cf, [I2, I3, I1])
-    assert cf.trees_from_bottom == { 3: [3, 2, 1, 0] }
-    assert cf.descendents_by_top == { 0: {3} }
+    assert cf.trees_from_bottom == {3: [3, 2, 1, 0]}
+    assert cf.descendents_by_top == {0: {3}}
+
 
 def test_scramble():
     ITEMS = [BHO(i, (i-1)//2, 10) for i in range(7)]
-    tfb = { 3: [3, 1, 0, -1], 4: [4,1,0,-1], 5: [5,2,0,-1], 6:[6,2,0,-1] }
-    dbt = { -1: {3,4,5,6}}
+    tfb = {
+        3: [3, 1, 0, -1],
+        4: [4, 1, 0, -1],
+        5: [5, 2, 0, -1],
+        6: [6, 2, 0, -1]
+    }
+    dbt = {-1: {3, 4, 5, 6}}
     do_scramble(ITEMS, tfb, dbt)
+
 
 def test_branch_switch():
     cf = ChainFinder()
-    assert cf.trees_from_bottom == { }
-    assert cf.descendents_by_top == { }
+    assert cf.trees_from_bottom == {}
+    assert cf.descendents_by_top == {}
     ITEMS = [BHO(i) for i in range(4)]
     B201 = BHO(201, 2, 10)
-    B202, B203, B204 = [BHO(i) for i in range(202,205)]
+    B202, B203, B204 = [BHO(i) for i in range(202, 205)]
 
     items = ITEMS + [B201, B202, B203, B204]
-    tfb = { 204: [204, 203, 202, 201, 2, 1, 0, -1], 3:[3, 2, 1, 0, -1]}
-    dbt = { -1: {3, 204}}
+    tfb = {204: [204, 203, 202, 201, 2, 1, 0, -1], 3: [3, 2, 1, 0, -1]}
+    dbt = {-1: {3, 204}}
     do_scramble(items, tfb, dbt)
 
 
@@ -135,7 +159,7 @@ def test_longest_chain_endpoint():
     cf = ChainFinder()
     ITEMS = [BHO(i) for i in range(5)]
     B201 = BHO(201, 2, 110)
-    B202, B203, B204 = [BHO(i) for i in range(202,205)]
+    B202, B203, B204 = [BHO(i) for i in range(202, 205)]
 
     def node_weight_f(h):
         if h == -1:
@@ -159,7 +183,7 @@ def test_find_ancestral_path():
 
     ITEMS = [BHO(i) for i in range(5)]
     B201 = BHO(201, 2, 110)
-    B202, B203, B204 = [BHO(i) for i in range(202,205)]
+    B202, B203, B204 = [BHO(i) for i in range(202, 205)]
 
     cf = ChainFinder()
     items = ITEMS + [B202, B203, B204]

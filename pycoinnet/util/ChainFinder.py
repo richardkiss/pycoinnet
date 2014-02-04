@@ -23,7 +23,6 @@ class ChainFinder(object):
         # make a list
         while len(new_hashes) > 0:
             h = new_hashes.pop()
-            initial_bottom_h = h
             path = [h]
             while 1:
                 h = self.parent_lookup.get(h)
@@ -57,7 +56,7 @@ class ChainFinder(object):
                     if path[0] in self.trees_from_bottom:
                         del self.trees_from_bottom[path[0]]
                     else:
-                        pass#import pdb; pdb.set_trace()
+                        pass  # TODO: improve this
                 del self.descendents_by_top[bottom_h]
                 top_descendents.update(bottom_descendents)
             else:
@@ -99,4 +98,4 @@ class ChainFinder(object):
             if p1[i1] == p2[i2]:
                 return p1[:i1+1], p2[:i2+1]
             i1 += 1
-            i2 += 1            
+            i2 += 1

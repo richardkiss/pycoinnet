@@ -7,6 +7,7 @@ import time
 
 logging = logging.getLogger("PingPongHandler")
 
+
 class PingPongHandler:
     def __init__(self, peer, heartbeat_rate=60, missing_pong_disconnect_timeout=60):
         self.peer = peer

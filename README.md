@@ -29,8 +29,7 @@ Try It
 $ python examples/address_keeper.py
 ```
 
-This example will connect, fetch a list of peers, and keep it groomed in a text file called addresses.txt. Check the source for more info.
-
+This example will connect, fetch a list of peers, and keep it groomed in a text file called addresses.txt. Check the source for more info. NOTE: it will probably display a lot of errors when it runs, as most of the initial peers, acquired via DNS, are down.
 
 Future Direction
 ----------------

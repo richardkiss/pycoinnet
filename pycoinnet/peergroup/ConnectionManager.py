@@ -4,18 +4,15 @@ Keep track of all connected peers.
 """
 
 import asyncio.queues
-import binascii
 import logging
-
-from pycoin.serialize import b2h_rev
-
-from pycoinnet.util.Queue import Queue
 
 logging = logging.getLogger("ConnectionManager")
 
+
 class ConnectionManager:
 
-    def __init__(self, address_queue, peer_protocol_factory, min_connection_count=4, max_connection_count=10):
+    def __init__(self, address_queue, peer_protocol_factory,
+                 min_connection_count=4, max_connection_count=10):
         self.address_queue = address_queue
         self.peers_connecting = set()
         self.peers_connected = set()

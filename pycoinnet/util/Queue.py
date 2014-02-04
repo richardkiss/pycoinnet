@@ -2,6 +2,7 @@
 import asyncio.queues
 import logging
 
+
 class Queue(asyncio.queues.Queue):
     """
     We add a "get_all" method here.
