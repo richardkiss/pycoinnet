@@ -196,3 +196,10 @@ def test_find_ancestral_path():
     old_subpath, new_subpath = cf.find_ancestral_path(old_chain_endpoint, new_chain_endpoint)
     assert old_subpath == [4, 3, 2]
     assert new_subpath == [204, 203, 202, 201, 2]
+
+
+def test_large():
+    ITEMS = [BHO(i) for i in range(10000)]
+    cf = ChainFinder()
+    load_items(cf, ITEMS)
+    old_subpath, new_subpath = cf.find_ancestral_path(5000, 9000)

@@ -69,7 +69,8 @@ There is not much built-in support for persistent storage for now beyond the "ad
 Donate
 ------
 
-Want to donate? Feel free. Send to 1KissEskteXTAXbh17qJYLtMes1B6kJxZj. Or hire me to do bitcoin consulting... him@richardkiss.com.
+Want to donate? Feel free. Send to 1KissEskteXTAXbh17qJYLtMes1B6kJxZj.
+Or hire me to do bitcoin consulting... him@richardkiss.com.
 
 
 [pycoin]: https://github.com/richardkiss/pycoin

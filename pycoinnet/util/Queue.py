@@ -19,3 +19,6 @@ class Queue(asyncio.queues.Queue):
         except asyncio.queues.Empty:
             logging.error("get_nowait failed unexpectedly")
         return items
+
+    def pop(self):
+        return self._queue.pop()

@@ -77,12 +77,13 @@ class ChainFinder(object):
         v = self.trees_from_bottom.get(h)
         if v:
             return v
-        h1 = self.parent_lookup.get(h)
-        v = [h]
-        if h1 is not None:
-            v1 = self.maximum_path(h1, cache)
-            v.extend(v1)
-        cache[h] = v
+        h1 = h
+        v = []
+        while h1 is not None:
+            v.append(h1)
+            h1 = self.parent_lookup.get(h1)
+        for i, h1 in enumerate(v):
+            cache[h1] = v[i:]
         return v
 
     def find_ancestral_path(self, h1, h2, path_cache={}):
