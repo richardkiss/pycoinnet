@@ -11,6 +11,7 @@ import logging
 import random
 import time
 
+from pycoinnet.helpers.standards import initial_handshake, version_data_for_peer
 from pycoinnet.peer.BitcoinPeerProtocol import BitcoinPeerProtocol
 
 
@@ -72,17 +73,21 @@ class AddressDB(object):
 
 class AddressKeeper:
     def __init__(self, peer, address_db):
-        self.address_db = address_db
-        peer.register_delegate(self)
-        self.address_db = address_db
+        next_message = peer.new_get_next_message_f(lambda name, data: name == 'addr')
 
-    def handle_msg_addr(self, peer, date_address_tuples):
-        self.address_db.add_addresses(
-            (timestamp, address.ip_address.exploded, address.port)
-            for timestamp, address in date_address_tuples)
-        self.address_db.save()
-        # we got addresses from this client. Exit loop and disconnect
-        peer.stop()
+        def get_msg_addr():
+            peer.send_msg("getaddr")
+            name, data = yield from next_message()
+            date_address_tuples = data["date_address_tuples"]
+            logging.info("got %s message from %s with %d entries", name, peer, len(date_address_tuples))
+            address_db.add_addresses(
+                (timestamp, address.ip_address.exploded, address.port)
+                for timestamp, address in date_address_tuples)
+            address_db.save()
+            # we got addresses from this client. Exit loop and disconnect
+            peer.transport.close()
+
+        asyncio.Task(get_msg_addr())
 
 
 @asyncio.coroutine
@@ -101,14 +106,15 @@ def connect_to_remote(event_loop, magic_header, address_db, connections):
 
     try:
         logging.info("connected to %s:%d", host, port)
+        yield from asyncio.wait_for(peer.connection_made_future, timeout=None)
+        version_parameters = version_data_for_peer(peer)
+        version_data = yield from initial_handshake(peer, version_parameters)
         AddressKeeper(peer, address_db)
         address_db.add_address(host, port, int(time.time()))
-        connections.add(transport)
-        peer.run()
+        connections.add(peer)
     except Exception:
         logging.exception("exception talking to %s:%d", host, port)
     logging.info("done talking to %s:%d", host, port)
-    connections.remove(transport)
 
 
 def keep_minimum_connections(event_loop, min_connection_count=4):
