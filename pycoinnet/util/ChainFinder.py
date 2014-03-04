@@ -69,10 +69,6 @@ class ChainFinder(object):
     def missing_parents(self):
         return self.descendents_by_top.keys()
 
-    def remove_chains_under_item(self, h):
-        # TODO: implement, then call
-        pass
-
     def maximum_path(self, h, cache={}):
         v = self.trees_from_bottom.get(h)
         if v:

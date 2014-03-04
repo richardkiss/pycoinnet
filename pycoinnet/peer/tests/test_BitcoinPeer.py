@@ -1,67 +1,7 @@
 import asyncio
 
-from pycoinnet.peer.BitcoinPeerProtocol import BitcoinPeerProtocol, BitcoinProtocolError
-from pycoinnet.PeerAddress import PeerAddress
-
-MAGIC_HEADER = b"food"
-
-
-class PeerTransport(asyncio.Transport):
-    def __init__(self, write_f, *args, **kwargs):
-        super(PeerTransport, self).__init__(*args, **kwargs)
-        self.write_f = write_f
-
-    def write(self, data):
-        self.write_f(data)
-
-    def close(self):
-        pass
-
-    def get_extra_info(self, key):
-        class ob:
-            def getpeername(self):
-                return "192.168.1.1", 8081
-        return ob()
-
-def send_version_msg(peer):
-    d = peer.default_msg_version_parameters()
-    d.update(peer.override_msg_version_parameters)
-    peer.send_msg("version", **d)
-
-@asyncio.coroutine
-def perform_handshake(peer):
-    send_version_msg(peer)
-    next_message = peer.new_get_next_message_f()
-    peer.start()
-
-    message_name, version_data = yield from next_message()
-    if message_name != 'version':
-        raise BitcoinProtocolError("missing version")
-    peer.send_msg("verack")
-
-    message_name, data = yield from next_message()
-    if message_name != 'verack':
-        raise BitcoinProtocolError("missing verack")
-
-VERSION_MSG_BIN = b'foodversion\x00\x00\x00\x00\x00^\x00\x00\x00\xe0?\xce\xd8q\x11\x01\x00\x01\x00\x00\x00\x00\x00\x00\x00"\xd7\x03S\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xff\xff\x7f\x00\x00\x02\x17\xdf\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xff\xff\x7f\x00\x00\x01\x17\xdf\xec\r#\xbb\x82 Z/\t/Notoshi/\x00\x00\x00\x00'
-
-VERSION_MSG = dict(
-    version=70001, subversion=b"/Notoshi/", services=1, timestamp=1392760610,
-    remote_address=PeerAddress(1, "127.0.0.2", 6111),
-    local_address=PeerAddress(1, "127.0.0.1", 6111),
-    nonce=3412075413544046060,
-    last_block_index=0
-)
-
-VERACK_MSG_BIN = b'foodverack\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00]\xf6\xe0\xe2'
-
-VERSION_MSG_2 = dict(
-    version=70001, subversion=b"/Notoshi/", services=1, timestamp=1392760614,
-    remote_address=PeerAddress(1, "127.0.0.1", 6111),
-    local_address=PeerAddress(1, "127.0.0.2", 6111),
-    nonce=5412937754643071,
-    last_block_index=0
-)
+from pycoinnet.peer.BitcoinPeerProtocol import BitcoinPeerProtocol
+from pycoinnet.peer.tests.helper import PeerTransport, MAGIC_HEADER, VERSION_MSG_BIN, VERSION_MSG, VERSION_MSG, VERSION_MSG_2, VERACK_MSG_BIN
 
 
 def test_BitcoinPeerProtocol_send():

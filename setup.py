@@ -9,6 +9,7 @@ setup(
     version=version,
     packages=[
         "pycoinnet",
+        "pycoinnet.helpers",
         "pycoinnet.peer",
         "pycoinnet.peergroup",
         "pycoinnet.util",

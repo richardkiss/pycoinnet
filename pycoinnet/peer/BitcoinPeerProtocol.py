@@ -26,8 +26,8 @@ class BitcoinPeerProtocol(asyncio.Protocol):
         super(BitcoinPeerProtocol, self).__init__(*args, **kwargs)
         self.magic_header = magic_header
         self.peername = ("(unconnected)", 0)
-        self.did_connection_made = asyncio.Future()
-        self.did_connection_lost = asyncio.Future()
+        self.connection_made_future = asyncio.Future()
+        self.connection_lost_future = asyncio.Future()
         self._run_handle = None
         self.message_queues = weakref.WeakSet()
         ## stats
@@ -38,7 +38,7 @@ class BitcoinPeerProtocol(asyncio.Protocol):
     def new_get_next_message_f(self, filter_f=lambda message_name, data: True, maxsize=0):
         @asyncio.coroutine
         def run(self):
-            yield from asyncio.wait_for(self.did_connection_made, timeout=None)
+            yield from asyncio.wait_for(self.connection_made_future, timeout=None)
             while True:
                 try:
                     message_name, data = yield from self._parse_next_message()
@@ -78,12 +78,12 @@ class BitcoinPeerProtocol(asyncio.Protocol):
         packet = b"".join([
             self.magic_header, message_type_padded, message_size, message_checksum, message_data
         ])
-        logging.debug("sending message %s [%d bytes]", message_type.decode("utf8"), len(packet))
+        logging.debug("sending message %s [%d bytes] to %s", message_type.decode("utf8"), len(packet), self)
         self.bytes_writ += len(packet)
         self.transport.write(packet)
 
     def connection_made(self, transport):
-        self.did_connection_made.set_result(transport)
+        self.connection_made_future.set_result(transport)
         self.transport = transport
         self.reader = asyncio.StreamReader()
         self._is_writable = True
@@ -92,9 +92,11 @@ class BitcoinPeerProtocol(asyncio.Protocol):
 
     def connection_lost(self, exc):
         if exc:
-            self.did_connection_lost.set_exception(exc)
+            self.connection_lost_future.set_exception(exc)
         else:
-            self.did_connection_lost.set_result(None)
+            self.connection_lost_future.set_result(None)
+        ## TODO: fix this. This is a stupid way of doing it.
+        ## What is the correct way to shut this down?
         self.reader.feed_eof()
 
     def data_received(self, data):

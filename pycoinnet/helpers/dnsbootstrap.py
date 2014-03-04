@@ -1,36 +1,20 @@
-#!/usr/bin/env python
-
 """
 Bitcoin client that connects to DNS bootstrap connections, grabs addr records,
 disconnects after enough records are obtained, and that's that.
 """
 
 import asyncio
-import binascii
 import logging
 
 from asyncio.queues import PriorityQueue
 
-from pycoinnet.helpers.standards import default_msg_version_parameters
 from pycoinnet.helpers.standards import initial_handshake
 from pycoinnet.helpers.standards import get_date_address_tuples
+from pycoinnet.helpers.standards import version_data_for_peer
 from pycoinnet.peer.BitcoinPeerProtocol import BitcoinPeerProtocol
 from pycoinnet.util.Queue import Queue
 
-MAINNET_MAGIC_HEADER = binascii.unhexlify('F9BEB4D9')
-MAINNET_DNS_BOOTSTRAP = [
-    "seed.bitcoin.sipa.be", "dnsseed.bitcoin.dashjr.org"
-    "bitseed.xf2.org", "dnsseed.bluematt.me",
-]
-
-TESTNET_MAGIC_HEADER = binascii.unhexlify('0B110907')
-TESTNET_DNS_BOOTSTRAP = [
-    "bitcoin.petertodd.org", "testnet-seed.bitcoin.petertodd.org",
-    "bluematt.me", "testnet-seed.bluematt.me"
-]
-
-
-def new_queue_of_timestamp_peeraddress_tuples(magic_header=MAINNET_MAGIC_HEADER, dns_bootstrap=MAINNET_DNS_BOOTSTRAP):
+def new_queue_of_timestamp_peeraddress_tuples(network_info, timestamp_peeraddress_tuple_queue=None):
     """
     Returns a queue which is populated with (time, host, port) tuples of
     addresses of regular peers that we can connect to.
@@ -38,6 +22,9 @@ def new_queue_of_timestamp_peeraddress_tuples(magic_header=MAINNET_MAGIC_HEADER,
     This works by connecting to superpeers at the DNS addresses passed and
     fetching addr records. Once we have enough, stop.
     """
+
+    magic_header = network_info["MAGIC_HEADER"]
+    dns_bootstrap = network_info["DNS_BOOTSTRAP"]
 
     superpeer_ip_queue = Queue()
 
@@ -50,7 +37,8 @@ def new_queue_of_timestamp_peeraddress_tuples(magic_header=MAINNET_MAGIC_HEADER,
                 yield from superpeer_ip_queue.put(t)
                 logging.debug("got address %s", t)
 
-    timestamp_peeraddress_tuple_queue = PriorityQueue()
+    if timestamp_peeraddress_tuple_queue is None:
+        timestamp_peeraddress_tuple_queue = PriorityQueue()
 
     @asyncio.coroutine
     def loop_connect_to_superpeer(superpeer_ip_queue):
@@ -63,7 +51,7 @@ def new_queue_of_timestamp_peeraddress_tuples(magic_header=MAINNET_MAGIC_HEADER,
                     lambda: BitcoinPeerProtocol(magic_header), host=host, port=port)
 
                 logging.debug("connected to superpeer at %s", peer_name)
-                yield from initial_handshake(peer, default_msg_version_parameters(peer))
+                yield from initial_handshake(peer, version_data_for_peer(peer))
                 logging.debug("handshake complete on %s", peer_name)
 
                 date_address_tuples = yield from get_date_address_tuples(peer)
