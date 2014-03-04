@@ -13,7 +13,6 @@ import logging
 import time
 import weakref
 
-from pycoinnet.InvItem import ITEM_TYPE_TX
 from pycoinnet.peer.Fetcher import Fetcher
 
 
@@ -25,7 +24,7 @@ class InvCollector:
         self.fetchers_by_peer = {}
         self.advertise_queues = weakref.WeakSet()
         self.inv_item_queues = set()
-        self.inv_item_fetchers_q = {}
+        self.inv_item_peers_q = {}
 
     def add_peer(self, peer):
         """
@@ -54,9 +53,14 @@ class InvCollector:
             try:
                 while True:
                     name, data = yield from next_message()
-                    for inv_item in data["items"]:
-                        logging.debug("noting %s available from %s", inv_item, peer)
-                        self._register_inv_item(inv_item, peer)
+                    if name == 'inv':
+                        for inv_item in data["items"]:
+                            logging.debug("noting %s available from %s", inv_item, peer)
+                            self._register_inv_item(inv_item, peer)
+                    if name == 'notfound':
+                        for inv_item in data["items"]:
+                            logging.debug("noting %s not available from %s", inv_item, peer)
+                            self._unregister_inv_item(inv_item, peer)
             except EOFError:
                 del self.fetchers_by_peer[peer]
                 advertise_task.cancel()
@@ -65,7 +69,7 @@ class InvCollector:
 
         advertise_task = asyncio.Task(_advertise_to_peer(peer, q))
 
-        next_message = peer.new_get_next_message_f(lambda name, data: name == "inv")
+        next_message = peer.new_get_next_message_f(lambda name, data: name in ("inv", "notfound"))
         asyncio.Task(_watch_peer(peer, next_message, advertise_task))
 
     def fetcher_for_peer(self, peer):
@@ -82,50 +86,84 @@ class InvCollector:
 
     @asyncio.coroutine
     def fetch(self, inv_item, peer_timeout=10):
+        # create the queue of peers that have this inv_item available
         q = asyncio.Queue()
         items = sorted(self.inv_item_db[inv_item.data].items(), key=lambda pair: pair[-1])
         for peer, when in items:
-            fetcher = self.fetchers_by_peer.get(peer)
-            if fetcher:
-                q.put_nowait((peer, fetcher))
-        self.inv_item_fetchers_q[inv_item.data] = q
+            q.put_nowait(peer)
+        # make the queue available to the object so if more peers
+        # announce they have it, they can be queried
+        self.inv_item_peers_q[inv_item.data] = q
 
-        futures = []
+        # this is the set of futures that we are trying to fetch the item from
+        pending_fetchers = set()
 
+        # this async method delays a specific amount of time, then
+        # fetches a new peer from the queue
         @asyncio.coroutine
-        def _q_change(q, futures, timeout=0):
-            yield from asyncio.sleep(timeout)
-            peer, fetcher = yield from q.get()
+        def _wait_for_timeout_and_peer(q, initial_delay=0):
+            yield from asyncio.sleep(initial_delay)
+            while True:
+                peer = yield from q.get()
+                fetcher = self.fetchers_by_peer.get(peer)
+                if fetcher:
+                    break
             logging.debug("requesting %s from %s", inv_item, peer)
-            future = asyncio.Task(fetcher.fetch(inv_item))
-            futures.append(future)
+            return asyncio.Task(fetcher.fetch(inv_item))
+
+        # the loop works like this:
+        #   request the item from a peer
+        #   wait 10 s or for response (either notfound or found)
+        #   if found, done
+        #   if notfound or time out, get another peer
+
+        most_recent_fetcher = None
 
         while True:
-            timeout = peer_timeout if len(futures) > 0 else 0
-            q_change_future = asyncio.Task(_q_change(q, futures, timeout=timeout))
-            all_futures = futures + [q_change_future]
-            done, pending = yield from asyncio.wait(all_futures, return_when=asyncio.FIRST_COMPLETED)
+            if most_recent_fetcher is None and q.qsize() > 0:
+                most_recent_fetcher = yield from _wait_for_timeout_and_peer(q)
+                timer_future = asyncio.Task(_wait_for_timeout_and_peer(q, initial_delay=peer_timeout))
 
-            if q_change_future in done:
+            futures = pending_fetchers.union(set([timer_future]))
+
+            if most_recent_fetcher:
+                futures.add(most_recent_fetcher)
+
+            done, pending_fetchers = \
+                yield from asyncio.wait(list(futures), return_when=asyncio.FIRST_COMPLETED)
+
+            # is it time to try a new fetcher?
+            if timer_future in done:
+                # we timed out, so we need to queue up another peer
+                most_recent_fetcher = timer_future.result()
+                logging.debug("timeout, need to request from a new peer, %s", inv_item)
+                timer_future = asyncio.Task(_wait_for_timeout_and_peer(q, initial_delay=peer_timeout))
+                # we have a new peer available as the result of get_fetcher_future
                 continue
 
+            # is the most recent done?
+            if most_recent_fetcher and most_recent_fetcher.done():
+                r = most_recent_fetcher.result()
+                if r:
+                    return r
+                # we got a "notfound" from this one
+                # queue up another peer
+                logging.debug("got a notfound, need to try a new peer for %s", inv_item)
+                timer_future.cancel()
+                pending_fetchers.discard(timer_future)
+                most_recent_fetcher = None
+                timer_future = asyncio.Task(_wait_for_timeout_and_peer(q, initial_delay=0))
+                # we have a new peer available as the result of timer_future
+                continue
+
+            # one or more fetchers is done
+            # if any of them have a non-None result, we're golden
             for f in done:
                 r = f.result()
-                if r is None:
-                    futures.remove(f)
-                    del self.inv_item_db[inv_item.data][peer]
-                else:
-                    for p in pending:
-                        p.cancel()
-                    if inv_item.data in self.inv_item_fetchers_q:
-                        del self.inv_item_fetchers_q[inv_item.data]
+                if r:
+                    logging.info("Got %s", r)
                     return r
-
-            logging.debug("got notfound")
-
-            if not q_change_future.cancelled():
-                q_change_future.cancel()
-
+            # otherwise, we just continue trying, using the new pending_fetchers
 
     def advertise_item(self, inv_item):
         """
@@ -143,6 +181,10 @@ class InvCollector:
             for q in self.inv_item_queues:
                 q.put_nowait(inv_item)
         self.inv_item_db[the_hash][peer] = time.time()
-        if the_hash in self.inv_item_fetchers_q:
-            fetcher = self.fetchers_by_peer.get(peer)
-            self.inv_item_fetchers_q[the_hash].put_nowait((peer, fetcher))
+        if the_hash in self.inv_item_peers_q:
+            self.inv_item_peers_q[the_hash].put_nowait(peer)
+
+    def _unregister_inv_item(self, inv_item, peer):
+        the_hash = inv_item.data
+        if the_hash in self.inv_item_db:
+            del self.inv_item_db[the_hash][peer]
