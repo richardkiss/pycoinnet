@@ -1,7 +1,6 @@
 import asyncio
 import binascii
 import logging
-import os
 import struct
 import time
 import weakref
@@ -9,9 +8,6 @@ import weakref
 from pycoin import encoding
 
 from pycoinnet.message import parse_from_data, pack_from_data
-from pycoinnet.message import MESSAGE_STRUCTURES
-from pycoinnet.PeerAddress import PeerAddress
-from pycoinnet.util.Queue import Queue
 
 
 class BitcoinProtocolError(Exception):
@@ -34,6 +30,7 @@ class BitcoinPeerProtocol(asyncio.Protocol):
         self.bytes_read = 0
         self.bytes_writ = 0
         self.connect_start_time = None
+        self._tasks = set()
 
     def new_get_next_message_f(self, filter_f=lambda message_name, data: True, maxsize=0):
         @asyncio.coroutine
@@ -54,20 +51,30 @@ class BitcoinPeerProtocol(asyncio.Protocol):
                 if message_name is None:
                     break
 
-        q = Queue(maxsize=maxsize)
+        q = asyncio.Queue(maxsize=maxsize)
         q.filter_f = filter_f
         self.message_queues.add(q)
+
         def get_next_message():
             msg_name, data = yield from q.get()
-            if msg_name == None:
+            if msg_name is None:
                 raise EOFError
             return msg_name, data
+
         if self._run_handle:
             if self._run_handle.done():
                 q.put_nowait((None, None))
         else:
             self._run_handle = asyncio.Task(run(self))
         return get_next_message
+
+    def add_task(self, task):
+        """
+        Some Task objects are associated with the peer. This method
+        gives an easy way to keep a strong reference to a Task that won't
+        disappear until the peer does.
+        """
+        self._tasks.add(asyncio.async(task))
 
     def send_msg(self, message_name, **kwargs):
         message_data = pack_from_data(message_name, **kwargs)

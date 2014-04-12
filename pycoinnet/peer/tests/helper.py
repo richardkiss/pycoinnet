@@ -54,6 +54,10 @@ VERSION_MSG_2 = dict(
     last_block_index=0
 )
 
+def dump(peer):
+    for msg in peer.msg_list:
+        print(msg)
+
 def watch_messages(peer):
     @asyncio.coroutine
     def _watch(msg_list, next_message_f):
@@ -63,7 +67,8 @@ def watch_messages(peer):
             if v[0] == None:
                 break
     peer.msg_list = []
-    asyncio.Task(_watch(peer.msg_list, peer.new_get_next_message_f()))
+    peer.add_task(_watch(peer.msg_list, peer.new_get_next_message_f()))
+    peer.dump = lambda: dump(peer)
 
 def create_peers(ip1="127.0.0.1", ip2="127.0.0.2"):
     peer1 = BitcoinPeerProtocol(MAGIC_HEADER)

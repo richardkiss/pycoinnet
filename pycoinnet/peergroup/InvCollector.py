@@ -23,7 +23,7 @@ class InvCollector:
 
         self.fetchers_by_peer = {}
         self.advertise_queues = weakref.WeakSet()
-        self.inv_item_queues = set()
+        self.inv_item_queues = weakref.WeakSet()
         self.inv_item_peers_q = {}
 
     def add_peer(self, peer):
@@ -70,7 +70,7 @@ class InvCollector:
         advertise_task = asyncio.Task(_advertise_to_peer(peer, q))
 
         next_message = peer.new_get_next_message_f(lambda name, data: name in ("inv", "notfound"))
-        asyncio.Task(_watch_peer(peer, next_message, advertise_task))
+        peer.add_task(_watch_peer(peer, next_message, advertise_task))
 
     def fetcher_for_peer(self, peer):
         return self.fetchers_by_peer.get(peer)
@@ -164,6 +164,17 @@ class InvCollector:
                     logging.info("Got %s", r)
                     return r
             # otherwise, we just continue trying, using the new pending_fetchers
+
+    def fetch_validate_store_item_async(self, inv_item, item_store, validator_f):
+        def _run():
+            item = item_store.get(inv_item.data)
+            if item:
+                return
+            item = yield from self.fetch(inv_item)
+            if item and validator_f(item):
+                item_store[item.hash()] = item
+                self.advertise_item(inv_item)
+        return asyncio.Task(_run())
 
     def advertise_item(self, inv_item):
         """

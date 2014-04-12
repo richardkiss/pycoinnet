@@ -23,10 +23,9 @@ from pycoinnet.peer.Fetcher import Fetcher
 class Blockfetcher:
     def __init__(self):
         self.block_hash_priority_queue = asyncio.PriorityQueue()
-        self.fetch_future_lookup = weakref.WeakKeyDictionary()
 
     def add_peer(self, peer, fetcher, last_block_index):
-        self.fetch_future_lookup[peer] = asyncio.Task(self.fetch_from_peer(peer, fetcher, last_block_index))
+        peer.add_task(self.fetch_from_peer(peer, fetcher, last_block_index))
 
     def get_block_future(self, block_hash, block_index):
         future = asyncio.Future()
@@ -73,7 +72,7 @@ class Blockfetcher:
             futures = []
             for item in items_to_try:
                 if item[-1].done():
-                    break
+                    continue
                 future = asyncio.Task(fetcher.fetch(item[1]))
 
                 def make_cb(the_future):
@@ -85,6 +84,8 @@ class Blockfetcher:
                 future.add_done_callback(make_cb(item[-1]))
                 futures.append(future)
             if len(futures) == 0:
+                logging.debug("no fetchable blocks, sleeping")
+                yield from asyncio.sleep(10)
                 continue
             done, pending = yield from asyncio.wait(futures, timeout=loop_timeout)
             finish_time = time.time() - start_time

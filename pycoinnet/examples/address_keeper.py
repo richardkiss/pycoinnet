@@ -87,7 +87,7 @@ class AddressKeeper:
             # we got addresses from this client. Exit loop and disconnect
             peer.transport.close()
 
-        asyncio.Task(get_msg_addr())
+        self.get_addr_task = asyncio.Task(get_msg_addr())
 
 
 @asyncio.coroutine
@@ -121,12 +121,15 @@ def keep_minimum_connections(event_loop, min_connection_count=4):
     connections = set()
     address_db = AddressDB("addresses.txt")
     magic_header = binascii.unhexlify('F9BEB4D9')  # use 0B110907 for testnet3
+    tasks = set()
     while 1:
         logging.debug("connection count is %d", len(connections))
         difference = min_connection_count - len(connections)
         for i in range(difference*2):
-            asyncio.Task(connect_to_remote(
+            f = asyncio.Task(connect_to_remote(
                 event_loop, magic_header, address_db, connections))
+            tasks.add(f)
+            f.add_callback(lambda x: tasks.discard(f))
         yield from asyncio.sleep(10)
 
 
@@ -136,7 +139,7 @@ def main():
         format=('%(asctime)s [%(process)d] [%(levelname)s] '
                 '%(filename)s:%(lineno)d %(message)s'))
     event_loop = asyncio.get_event_loop()
-    asyncio.Task(keep_minimum_connections(event_loop))
+    kmc_task = asyncio.Task(keep_minimum_connections(event_loop))
     event_loop.run_forever()
 
 main()

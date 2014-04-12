@@ -3,7 +3,7 @@ pycoinnet -- Speaking the Bitcoin Protocol
 
 The pycoinnet library is designed for use in conjunction with the Python pycoin library. It provides utilities and examples for writing tools in pure Python that speak the bitcoin protocol on the bitcoin network.
 
-Note that is uses the new asyncio library due to be release in Python 3.4 (and available from pypi in Python 3.3 -- type "pip install asyncio"), and so requires Python 3.3 or higher (unlike pycoin, which supports Python 2.7).
+Note that is uses the new asyncio library included in Python 3.4 (and available from pypi in Python 3.3 -- type "pip install asyncio"), and so requires Python 3.3 or higher (unlike pycoin, which supports Python 2.7).
 
 
 Install
@@ -13,26 +13,11 @@ Using virtual environments:
 
 ```
 $ NEW_ENV=~/.virtualenv-pycoinnetwork # or whatever path you'd like to use
-$ virtualenv -p python3 $NEW_ENV
+$ python3 -m venv $NEW_ENV
 $ source $NEW_ENV/bin/activate
 ```
 
-
-Python 3 Broken on Mac OS X Brew
---------------------------------
-
-On Mac OS X, using brew Python3, I've noticed that virtualenvs do NOT properly
-set up the pip install path, so packages are installed into the global Python3
-installation. This kind of defeats the purpose of virtualenvs!
-
-To fix this, edit the pip files.
-
-```
-$ vi $NEW_ENV/bin/pip*
-```
-
-In all three of these pip files, change ```#!/usr/local/bin/python3``` to ```#!/Users/<whatever>/.virtualenv-pycoinnetwork/env/bin/python3```
-substituting in your actual path to virtualenv python.
+Note that venv may require Python 3.4. You should use Python 3.4.
 
 
 Install Dependencies

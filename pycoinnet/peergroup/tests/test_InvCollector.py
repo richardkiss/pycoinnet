@@ -9,7 +9,7 @@ def test_InvCollector_simple():
     # create some peers
     peer1_2, peer2 = create_handshaked_peers()
 
-    # the peer1a, 1b, 1c represent the local peer
+    # peer1_2 represents the local peer
 
     TX_LIST = [make_tx(i) for i in range(10)]
 
@@ -27,14 +27,13 @@ def test_InvCollector_simple():
         return r
 
     @asyncio.coroutine
-    def run_remote_peer(peer, txs):
+    def run_remote_peer(next_message, peer, txs):
         tx_db = dict((tx.hash(), tx) for tx in txs)
         r = []
 
         inv_items = [InvItem(ITEM_TYPE_TX, tx.hash()) for tx in txs]
         peer.send_msg("inv", items=inv_items)
 
-        next_message = peer.new_get_next_message_f()
         while True:
             t = yield from next_message()
             r.append(t)
@@ -44,8 +43,8 @@ def test_InvCollector_simple():
         return r
 
     f1 = asyncio.Task(run_local_peer([peer1_2]))
-    f2 = asyncio.Task(run_remote_peer(peer2, TX_LIST))
-    done, pending = asyncio.get_event_loop().run_until_complete(asyncio.wait([f1]))
+    f2 = asyncio.Task(run_remote_peer(peer2.new_get_next_message_f(), peer2, TX_LIST))
+    done, pending = asyncio.get_event_loop().run_until_complete(asyncio.wait([f1], timeout=3.0))
     r = done.pop().result()
     assert len(r) == 10
     assert [tx.hash() for tx in r] == [tx.hash() for tx in TX_LIST]
@@ -54,20 +53,16 @@ def test_InvCollector_simple():
 def test_InvCollector():
     # create some peers
     peer1_2, peer2 = create_handshaked_peers()
-    peer1_3, peer3 = create_handshaked_peers()
-    peer1_4, peer4 = create_handshaked_peers()
+    peer1_3, peer3 = create_handshaked_peers(ip1="127.0.0.1", ip2="127.0.0.3")
+    peer1_4, peer4 = create_handshaked_peers(ip1="127.0.0.1", ip2="127.0.0.4")
 
-    # the peer1a, 1b, 1c represent the local peer
+    # peer1_* represents the local peer
 
     TX_LIST = [make_tx(i) for i in range(100)]
 
     @asyncio.coroutine
-    def run_local_peer(peer_list):
-        inv_collector = InvCollector()
-        for peer in peer_list:
-            inv_collector.add_peer(peer)
+    def run_local_peer(inv_collector, inv_item_q):
         r = []
-        inv_item_q = inv_collector.new_inv_item_queue()
         while len(r) < 90:
             inv_item = yield from inv_item_q.get()
             v = yield from inv_collector.fetch(inv_item)
@@ -75,14 +70,13 @@ def test_InvCollector():
         return r
 
     @asyncio.coroutine
-    def run_remote_peer(peer, txs):
+    def run_remote_peer(next_message, peer, txs):
         tx_db = dict((tx.hash(), tx) for tx in txs)
         r = []
 
         inv_items = [InvItem(ITEM_TYPE_TX, tx.hash()) for tx in txs]
         peer.send_msg("inv", items=inv_items)
 
-        next_message = peer.new_get_next_message_f()
         while True:
             t = yield from next_message()
             r.append(t)
@@ -93,11 +87,14 @@ def test_InvCollector():
 
     futures = []
     for peer, txs in [(peer2, TX_LIST[:30]), (peer3, TX_LIST[30:60]), (peer4, TX_LIST[60:90])]:
-        f = asyncio.Task(run_remote_peer(peer, txs))
+        f = asyncio.Task(run_remote_peer(peer.new_get_next_message_f(), peer, txs))
         futures.append(f)
 
-    f = asyncio.Task(run_local_peer([peer1_2, peer1_3, peer1_4]))
-    done, pending = asyncio.get_event_loop().run_until_complete(asyncio.wait([f]))
+    inv_collector = InvCollector()
+    [inv_collector.add_peer(peer) for peer in [peer1_2, peer1_3, peer1_4]]
+
+    f = asyncio.Task(run_local_peer(inv_collector, inv_collector.new_inv_item_queue()))
+    done, pending = asyncio.get_event_loop().run_until_complete(asyncio.wait([f], timeout=5.0))
     r = done.pop().result()
     assert len(r) == 90
     assert [tx.hash() for tx in r] == [tx.hash() for tx in TX_LIST[:90]]
@@ -210,11 +207,10 @@ def test_TxCollector_retry():
         return r
 
     @asyncio.coroutine
-    def run_local_peer(peer_list):
+    def run_local_peer(peer_list, r):
         inv_collector = InvCollector()
         for peer in peer_list:
             inv_collector.add_peer(peer)
-        r = []
         inv_item_q = inv_collector.new_inv_item_queue()
         
         @asyncio.coroutine
@@ -223,9 +219,11 @@ def test_TxCollector_retry():
             if v:
                 r.append(v)
 
+        # keep a strong reference to these tasks
+        tasks = []
         for i in range(10):
             inv_item = yield from inv_item_q.get()
-            asyncio.Task(_do_fetch(inv_collector, inv_item, r))
+            tasks.append(asyncio.Task(_do_fetch(inv_collector, inv_item, r)))
         while len(r) < 10:
             yield from asyncio.sleep(0.1)
         return r
@@ -233,10 +231,12 @@ def test_TxCollector_retry():
     f2 = asyncio.Task(run_remote_peer(peer2, TX_LIST, 1, 0.2))
     f3 = asyncio.Task(run_remote_peer(peer3, TX_LIST, 10, 1.0))
 
-    f = asyncio.Task(run_local_peer([peer1_2, peer1_3]))
+    r = []
+    f = asyncio.Task(run_local_peer([peer1_2, peer1_3], r))
     done, pending = asyncio.get_event_loop().run_until_complete(asyncio.wait([f], timeout=7.5))
+
     assert len(done) == 1
-    r = done.pop().result()
+    #r = done.pop().result()
     assert len(r) == 10
     assert set(tx.hash() for tx in r) == set(tx.hash() for tx in TX_LIST)
 

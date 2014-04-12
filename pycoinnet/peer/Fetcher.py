@@ -4,6 +4,7 @@ import weakref
 
 from pycoinnet.InvItem import InvItem, ITEM_TYPE_TX, ITEM_TYPE_BLOCK
 
+
 class Fetcher:
     def __init__(self, peer):
         self.peer = peer
@@ -11,8 +12,9 @@ class Fetcher:
         self.futures = weakref.WeakValueDictionary()
 
         getdata_loop_future = asyncio.Task(self._getdata_loop())
-        next_message = peer.new_get_next_message_f(filter_f=lambda name, data: name in ["tx", "block", "notfound"])
-        asyncio.Task(self._fetch_loop(next_message, getdata_loop_future))
+        next_message = peer.new_get_next_message_f(
+            filter_f=lambda name, data: name in ["tx", "block", "notfound"])
+        peer.add_task(self._fetch_loop(next_message, getdata_loop_future))
 
     def fetch(self, inv_item, timeout=None):
         """
@@ -53,7 +55,7 @@ class Fetcher:
                 if name in ["tx", "block"]:
                     item = data[name]
                     the_hash = item.hash()
-                    inv_item = InvItem(ITEM_TYPE_TX if name =='tx' else ITEM_TYPE_BLOCK, the_hash)
+                    inv_item = InvItem(ITEM_TYPE_TX if name == 'tx' else ITEM_TYPE_BLOCK, the_hash)
                     future = self.futures.get(inv_item)
                     if future:
                         del self.futures[inv_item]
