@@ -76,11 +76,11 @@ def _message_fixups():
         return d
 
     alert_submessage_parser = _make_parser(
-        "version:L relayUntil:Q expiration:Q id:L cancel:L setCancel:S minVer:L "
-        "maxVer:L setSubVer:S priority:L comment:S statusBar:S reserved:S")
+        "version:L relayUntil:Q expiration:Q id:L cancel:L setCancel:[L] minVer:L "
+        "maxVer:L setSubVer:[S] priority:L comment:S statusBar:S reserved:S")
 
     def fixup_alert(d, f):
-        d1 = alert_submessage_parser(f)
+        d1 = alert_submessage_parser(io.BytesIO(d["payload"]))
         d["alert_info"] = d1
         return d
 
