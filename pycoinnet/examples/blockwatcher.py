@@ -48,8 +48,8 @@ def write_block_to_disk(blockdir, block, block_index):
         block.stream(f)
     os.rename(tmp_path, p)
 
-def update_last_processed_block(config_dir, last_processed_block):
-    last_processed_block_path = os.path.join(config_dir, "last_processed_block")
+def update_last_processed_block(state_dir, last_processed_block):
+    last_processed_block_path = os.path.join(state_dir, "last_processed_block")
     try:
         with open(last_processed_block_path, "w") as f:
             f.write("%d\n" % last_processed_block)
@@ -57,8 +57,8 @@ def update_last_processed_block(config_dir, last_processed_block):
     except Exception:
         logging.exception("problem writing %s", last_processed_block_path)
 
-def get_last_processed_block(config_dir):
-    last_processed_block_path = os.path.join(config_dir, "last_processed_block")
+def get_last_processed_block(state_dir):
+    last_processed_block_path = os.path.join(state_dir, "last_processed_block")
     try:
         with open(last_processed_block_path) as f:
             last_processed_block = int(f.readline()[:-1])
@@ -67,8 +67,8 @@ def get_last_processed_block(config_dir):
         last_processed_block = 0
     return last_processed_block
 
-def block_processor(change_q, blockfetcher, config_dir, blockdir, depth):
-    last_processed_block = get_last_processed_block(config_dir)
+def block_processor(change_q, blockfetcher, state_dir, blockdir, depth):
+    last_processed_block = get_last_processed_block(state_dir)
     block_q = asyncio.Queue()
     while True:
         add_remove, block_hash, block_index = yield from change_q.get()
@@ -93,7 +93,7 @@ def block_processor(change_q, blockfetcher, config_dir, blockdir, depth):
             future, block_hash, block_index = yield from block_q.get()
             block = yield from asyncio.wait_for(future, timeout=None)
             write_block_to_disk(blockdir, block, block_index)
-            update_last_processed_block(config_dir, block_index)
+            update_last_processed_block(state_dir, block_index)
 
 @asyncio.coroutine
 def run_peer(peer, fetcher, fast_forward_add_peer, blockfetcher, inv_collector, blockhandler):
@@ -143,7 +143,7 @@ def log_file(logPath, level=logging.NOTSET):
 
 def main():
     parser = argparse.ArgumentParser(description="Watch Bitcoin network for new blocks.")
-    parser.add_argument('-c', "--config-dir", help='The directory where config files are stored.')
+    parser.add_argument('-s', "--state-dir", help='The directory where state files are stored.')
     parser.add_argument(
         '-f', "--fast-forward", type=int,
         help="block index to fast-forward to (ie. don't download full blocks prior to this one)", default=0
@@ -170,7 +170,8 @@ def main():
     if args.log_file:
         log_file(args.log_file)
 
-    block_chain_store = BlockChainStore(args.config_dir)
+    state_dir = args.state_dir
+    block_chain_store = BlockChainStore(state_dir)
     block_chain = BlockChain(did_lock_to_index_f=block_chain_store.did_lock_to_index)
 
     locker_task = block_chain_locker(block_chain)
@@ -191,8 +192,8 @@ def main():
     blockhandler = BlockHandler(inv_collector, block_chain, block_store,
         should_download_f=lambda block_hash, block_index: block_index >= args.fast_forward)
 
-    last_processed_block = max(get_last_processed_block(config_dir), args.fast_forward)
-    update_last_processed_block(config_dir, last_processed_block)
+    last_processed_block = max(get_last_processed_block(state_dir), args.fast_forward)
+    update_last_processed_block(state_dir, last_processed_block)
 
     change_q = asyncio.Queue()
     from pycoinnet.util.BlockChain import _update_q
@@ -200,7 +201,7 @@ def main():
 
     block_processor_task = asyncio.Task(
         block_processor(
-            change_q, blockfetcher, args.config_dir, args.blockdir, args.depth)))
+            change_q, blockfetcher, state_dir, args.blockdir, args.depth))
 
     fast_forward_add_peer = fast_forwarder_add_peer_f(block_chain)
 
