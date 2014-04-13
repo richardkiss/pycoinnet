@@ -101,5 +101,5 @@ class Blockfetcher:
             logging.debug("loop count now %d for %s", per_loop, peer)
             for item in items_to_try:
                 if not item[-1].done():
-                    self.block_hash_priority_queue.put(item)
+                    self.block_hash_priority_queue.put_nowait(item)
                     missing.add(item)

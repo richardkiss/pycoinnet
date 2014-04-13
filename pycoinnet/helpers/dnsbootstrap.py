@@ -28,9 +28,9 @@ def dns_bootstrap_host_port_q(network_info):
             for t in results:
                 yield from superpeer_ip_queue.put(t)
                 logging.debug("got address %s", t)
-        superpeer_ip_queue.put(None)
+        yield from superpeer_ip_queue.put(None)
 
-    asyncio.Task(bootstrap_superpeer_addresses(dns_bootstrap))
+    superpeer_ip_queue.task = asyncio.Task(bootstrap_superpeer_addresses(dns_bootstrap))
     return superpeer_ip_queue
 
 
