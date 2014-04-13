@@ -106,21 +106,14 @@ def run_peer(peer, fetcher, fast_forward_add_peer, blockfetcher, inv_collector, 
     inv_collector.add_peer(peer)
     blockhandler.add_peer(peer)
 
-def block_chain_locker(block_chain):
-    @asyncio.coroutine
-    def _run(block_chain, change_q):
-        LOCKED_MULTIPLE = 32
-        while True:
-            total_length = block_chain.length()
-            locked_length = block_chain.locked_length()
-            unlocked_length = total_length - locked_length
-            if unlocked_length > LOCKED_MULTIPLE:
-                new_locked_length = total_length - (total_length % LOCKED_MULTIPLE) - LOCKED_MULTIPLE
-                block_chain.lock_to_index(new_locked_length)
-            # wait for a change to blockchain
-            op, block_header, block_index = yield from change_q.get()
-
-    return asyncio.Task(_run(block_chain, block_chain.new_change_q()))
+def block_chain_locker_callback(block_chain, ops):
+    LOCKED_MULTIPLE = 32
+    total_length = block_chain.length()
+    locked_length = block_chain.locked_length()
+    unlocked_length = total_length - locked_length
+    if unlocked_length > LOCKED_MULTIPLE:
+        new_locked_length = total_length - (total_length % LOCKED_MULTIPLE) - LOCKED_MULTIPLE
+        block_chain.lock_to_index(new_locked_length)
 
 @asyncio.coroutine
 def new_block_fetcher(inv_collector, block_chain):
@@ -174,7 +167,7 @@ def main():
     block_chain_store = BlockChainStore(state_dir)
     block_chain = BlockChain(did_lock_to_index_f=block_chain_store.did_lock_to_index)
 
-    locker_task = block_chain_locker(block_chain)
+    block_chain.add_change_callback(block_chain_locker_callback)
     block_chain.add_nodes(block_chain_store.block_tuple_iterator())
 
     blockfetcher = Blockfetcher()
@@ -197,7 +190,9 @@ def main():
 
     change_q = asyncio.Queue()
     from pycoinnet.util.BlockChain import _update_q
-    block_chain.add_change_callback(lambda blockchain, ops: _update_q(change_q, ops))
+    def do_update(blockchain, ops):
+        _update_q(change_q, [list(o) for o in ops])
+    block_chain.add_change_callback(do_update)
 
     block_processor_task = asyncio.Task(
         block_processor(

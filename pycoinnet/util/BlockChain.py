@@ -1,8 +1,6 @@
 import logging
 import weakref
 
-from asyncio import Queue
-
 from pycoinnet.util.ChainFinder import ChainFinder
 
 ZERO_HASH = b'\0' * 32
@@ -29,7 +27,7 @@ class BlockChain:
         self.hash_to_index_lookup = {}
         self.weight_lookup = {}
         self.chain_finder = ChainFinder()
-        self.change_queues = set() #weakref.WeakSet()
+        self.change_callbacks = weakref.WeakSet()
         self._longest_chain_cache = None
         self.did_lock_to_index_f = did_lock_to_index_f
 
@@ -69,10 +67,8 @@ class BlockChain:
     def index_for_hash(self, the_hash):
         return self.hash_to_index_lookup.get(the_hash)
 
-    def new_change_q(self):
-        q = Queue()
-        self.change_queues.add(q)
-        return q
+    def add_change_callback(self, callback):
+        self.change_callbacks.add(callback)
 
     def lock_to_index(self, index):
         old_length = len(self._locked_chain)
@@ -165,7 +161,7 @@ class BlockChain:
             op = ("add", h, size-idx-1)
             ops.append(op)
             self.hash_to_index_lookup[size-idx-1] = h
-        for q in self.change_queues:
-            _update_q(q, ops)
+        for callback in self.change_callbacks:
+            callback(self, ops)
 
         return ops

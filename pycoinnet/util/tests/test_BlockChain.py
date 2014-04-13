@@ -145,6 +145,36 @@ def test_fork():
     assert set(BC.chain_finder.missing_parents()) == set([parent_for_0])
 
 
+def test_callback():
+    R = []
+    def the_callback(blockchain, ops):
+        R.extend(ops)
+
+    parent_for_0 = b'\0' * 32
+    # same as test_fork, above
+
+    BC = BlockChain(parent_for_0)
+    BC.add_change_callback(the_callback)
+
+    ITEMS = dict((i, (i, i-1, 1)) for i in range(7))
+    ITEMS[0] = (0, parent_for_0, 1)
+
+    ITEMS.update(dict((i, (i, i-1, 1)) for i in range(301, 306)))
+    ITEMS[301] = (301, 3, 1)
+
+    # send them all except 302
+    ops = BC.add_nodes((ITEMS[i] for i in ITEMS.keys() if i != 302))
+
+    # now send 302
+    ops = BC.add_nodes([ITEMS[302]])
+
+    expected = [("add", i, i) for i in range(7)]
+    expected += [("remove", i, i) for i in range(6, 3, -1)]
+    expected += [("add", i, i+4-301) for i in range(301,306)]
+
+    assert R == expected
+
+
 def test_large():
     SIZE = 3000
     ITEMS = [(i, i-1, 1) for i in range(SIZE)]

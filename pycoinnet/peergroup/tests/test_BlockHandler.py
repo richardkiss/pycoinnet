@@ -112,33 +112,28 @@ def test_BlockHandler_tcp():
     add_peer_1(peer1, 0)
     add_peer_2(peer2, len(BL1))
 
-    change_q_1 = block_chain_1.new_change_q()
-    change_q_2 = block_chain_2.new_change_q()
-
     assert block_chain_1.length() == len(BL1)
     assert block_chain_2.length() == 0
 
-    def wait_for_change_q(change_q, count):
-        @asyncio.coroutine
-        def async_tests(change_q, count):
-            r = []
-            while len(r) < count:
-                v = yield from change_q.get()
-                r.append(v)
-            return r
+    def wait_for_change_q(block_chain, count):
+        r = []
+        done = asyncio.Future()
+        def change_callback(blockchain, ops):
+            r.extend(ops)
+            if len(r) >= count:
+                done.set_result(r)
+        block_chain.add_change_callback(change_callback)
         try:
-            r = asyncio.get_event_loop().run_until_complete(asyncio.wait_for(async_tests(change_q, count), timeout=5))
+            r = asyncio.get_event_loop().run_until_complete(asyncio.wait_for(done, timeout=5))
         except asyncio.TimeoutError:
             r = []
         return r
 
-    r = wait_for_change_q(change_q_2, len(BL1))
+    r = wait_for_change_q(block_chain_2, len(BL1))
 
     assert len(r) == len(BL1)
     assert r == [('add', b.hash(), idx) for idx, b in enumerate(BL1)]
 
-    assert change_q_1.qsize() == 0
-    assert change_q_2.qsize() == 0
     assert block_chain_1.length() == len(BL1)
     assert block_chain_2.length() == len(BL1)
 
@@ -150,7 +145,7 @@ def test_BlockHandler_tcp():
     assert block_chain_1.length() == len(BLOCK_LIST)
     assert block_chain_2.length() == len(BL1)
 
-    r = wait_for_change_q(change_q_2, len(BL2))
+    r = wait_for_change_q(block_chain_2, len(BL2))
 
     peer1.dump()
     peer2.dump()
