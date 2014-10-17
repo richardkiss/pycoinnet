@@ -1,3 +1,5 @@
+from pycoin.blockchain.BlockChain import BlockChain
+
 from pycoinnet.util.debug_help import asyncio
 
 from pycoinnet.helpers import standards
@@ -8,7 +10,6 @@ from pycoinnet.peergroup.BlockHandler import BlockHandler
 
 from pycoinnet.InvItem import InvItem, ITEM_TYPE_BLOCK
 
-from pycoinnet.util.BlockChain import BlockChain
 from pycoinnet.peergroup.Blockfetcher import Blockfetcher
 from pycoinnet.peergroup.fast_forwarder import fast_forwarder_add_peer_f
 
