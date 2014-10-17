@@ -23,11 +23,14 @@ def dns_bootstrap_host_port_q(network_info):
     @asyncio.coroutine
     def bootstrap_superpeer_addresses(dns_bootstrap):
         for h in dns_bootstrap:
-            r = yield from asyncio.get_event_loop().getaddrinfo(h, 8333)
-            results = set(t[-1][:2] for t in r)
-            for t in results:
-                yield from superpeer_ip_queue.put(t)
-                logging.debug("got address %s", t)
+            try:
+                r = yield from asyncio.get_event_loop().getaddrinfo(h, 8333)
+                results = set(t[-1][:2] for t in r)
+                for t in results:
+                    yield from superpeer_ip_queue.put(t)
+                    logging.debug("got address %s", t)
+            except Exception:
+                logging.exception("problem in bootstrap_superpeer_addresses")
         yield from superpeer_ip_queue.put(None)
 
     superpeer_ip_queue.task = asyncio.Task(bootstrap_superpeer_addresses(dns_bootstrap))

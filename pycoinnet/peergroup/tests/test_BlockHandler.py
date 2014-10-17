@@ -132,7 +132,7 @@ def test_BlockHandler_tcp():
     r = wait_for_change_q(block_chain_2, len(BL1))
 
     assert len(r) == len(BL1)
-    assert r == [('add', b.hash(), idx) for idx, b in enumerate(BL1)]
+    assert [(a, b.hash(), c) for a, b, c in r] == [('add', b.hash(), idx) for idx, b in enumerate(BL1)]
 
     assert block_chain_1.length() == len(BL1)
     assert block_chain_2.length() == len(BL1)
@@ -151,7 +151,7 @@ def test_BlockHandler_tcp():
     peer2.dump()
 
     assert len(r) == len(BL2)
-    assert r == [('add', b.hash(), idx+len(BL1)) for idx, b in enumerate(BL2)]
+    assert [(a, b.hash(), c) for a, b, c in r] == [('add', b.hash(), idx+len(BL1)) for idx, b in enumerate(BL2)]
 
     assert block_chain_1.length() == len(BLOCK_LIST)
     assert block_chain_2.length() == len(BLOCK_LIST)
