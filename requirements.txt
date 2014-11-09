@@ -1,1 +1,1 @@
-pycoin==0.52
+-e git+https://github.com/richardkiss/pycoin.git@9bd64d0d3742e5e540cf0d3938a161c786e11a9c#egg=pycoin-master

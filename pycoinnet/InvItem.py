@@ -1,7 +1,7 @@
 from pycoin.serialize import b2h_rev
 from pycoin.serialize.bitcoin_streamer import parse_struct, stream_struct
 
-ITEM_TYPE_TX, ITEM_TYPE_BLOCK = (1, 2)
+ITEM_TYPE_TX, ITEM_TYPE_BLOCK, ITEM_TYPE_MERKLEBLOCK = (1, 2, 3)
 
 class InvItem(object):
     def __init__(self, item_type, data):
@@ -9,7 +9,7 @@ class InvItem(object):
         self.data = data
 
     def __str__(self):
-        INV_TYPES = [None, "Tx", "Block"]
+        INV_TYPES = [None, "Tx", "Block", "Merkle"]
         return "%s [%s]" % (INV_TYPES[self.item_type], b2h_rev(self.data))
 
     def __repr__(self):

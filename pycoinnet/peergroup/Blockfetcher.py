@@ -16,13 +16,25 @@ import logging
 import time
 import weakref
 
-from pycoinnet.InvItem import InvItem, ITEM_TYPE_BLOCK
+from pycoinnet.InvItem import InvItem, ITEM_TYPE_BLOCK, ITEM_TYPE_MERKLEBLOCK
 from pycoinnet.peer.Fetcher import Fetcher
 
 
 class Blockfetcher:
-    def __init__(self):
-        self.block_hash_priority_queue = asyncio.PriorityQueue()
+    """
+    Blockfetcher
+
+    This class is created once for each PeerGroup. It's used to accept a set of blocks
+    and download them in an overlapping way.
+
+    It accepts new peers via add_peer.
+
+    It fetches new blocks via get_block_future or get_block.
+    """
+    def __init__(self, max_q_size=0):
+        # this queue accepts tuples of the form:
+        #  (block_index, InvItem(ITEM_TYPE_BLOCK, block_hash), future)
+        self.block_hash_priority_queue = asyncio.PriorityQueue(max_q_size)
 
     def add_peer(self, peer, fetcher, last_block_index):
         peer.add_task(self.fetch_from_peer(peer, fetcher, last_block_index))
@@ -33,6 +45,13 @@ class Blockfetcher:
         self.block_hash_priority_queue.put_nowait(item)
         return future
 
+    def get_merkle_block_future(self, block_hash, block_index):
+        future = asyncio.Future()
+        item = (block_index, InvItem(ITEM_TYPE_MERKLEBLOCK, block_hash), future)
+        self.block_hash_priority_queue.put_nowait(item)
+        return future
+
+    @asyncio.coroutine
     def get_block(self, block_hash, block_index):
         future = self.get_block_future(block_hash, block_index)
         block = asyncio.wait_for(future, timeout=None)
