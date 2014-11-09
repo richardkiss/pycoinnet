@@ -1,10 +1,12 @@
 from pycoinnet.util.debug_help import asyncio
 
-from pycoinnet.peer.tests.helper import create_handshaked_peers, make_tx
 from pycoinnet.peergroup.InvCollector import InvCollector
 from pycoinnet.peergroup.TxHandler import TxHandler
 
 from pycoinnet.peer.BitcoinPeerProtocol import BitcoinPeerProtocol
+
+from pycoinnet.peer.tests.helper import create_handshaked_peers
+from pycoinnet.util.tests.helper import make_tx
 
 
 def test_TxHandler_simple():

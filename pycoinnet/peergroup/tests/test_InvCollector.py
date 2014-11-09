@@ -1,9 +1,11 @@
 from pycoinnet.util.debug_help import asyncio
 
-from pycoinnet.peer.tests.helper import create_handshaked_peers, make_tx
+from pycoinnet.peer.tests.helper import create_handshaked_peers
 from pycoinnet.peergroup.InvCollector import InvCollector
 
 from pycoinnet.InvItem import InvItem, ITEM_TYPE_TX, ITEM_TYPE_BLOCK
+
+from pycoinnet.util.tests.helper import make_tx
 
 def test_InvCollector_simple():
     # create some peers
