@@ -149,9 +149,18 @@ def get_date_address_tuples(peer):
 
 
 @asyncio.coroutine
-def get_headers_hashes(peer, after_block_hash):
-    hashes = [after_block_hash]
-    peer.send_msg(message_name="getheaders", version=1, hashes=hashes, hash_stop=after_block_hash)
+def get_headers_hashes(peer, until_block_hash):
+    hashes = [until_block_hash]
+    peer.send_msg(message_name="getheaders", version=1, hashes=hashes, hash_stop=until_block_hash)
+    next_message = peer.new_get_next_message_f(lambda name, data: name == 'headers')
+    name, data = yield from next_message()
+    headers = [bh for bh, t in data["headers"]]
+    return headers
+
+
+@asyncio.coroutine
+def do_get_headers(peer, block_locator_hashes, hash_stop=b'\0'*32):
+    peer.send_msg(message_name="getheaders", version=1, hashes=block_locator_hashes, hash_stop=hash_stop)
     next_message = peer.new_get_next_message_f(lambda name, data: name == 'headers')
     name, data = yield from next_message()
     headers = [bh for bh, t in data["headers"]]
