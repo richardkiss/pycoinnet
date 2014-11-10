@@ -33,22 +33,26 @@ $ pip install .
 Nothing here really pycoinnet-specific except the dependancy on pycoin.
 
 
-Try It
-------
+Try the SPV Demo
+----------------
+
+
 
 ```
-$ python pycoinnet/examples/address_keeper.py
+$ mkdir -p ~/.wallet/default
+$ echo 1Q2TWHE3GMdB6BZKafqwxXtWAWgFt5Jvm3 > ~/.wallet/default/watch_addresses  # first transaction ever, block 170
+$ echo 1CaNHx4vzpmPBv4a6U7pcKQF6R8U6JeLUy >> ~/.wallet/default/watch_addresses # very common address starting block 258045
+$ ku -ua 1 >> ~/.wallet/default/watch_addresses # address for secret exponent 1
+$ PYTHONPATH=`pwd` python pycoinnet/examples/wallet.py
 ```
 
-This example will connect, fetch a list of peers, and keep it groomed in a text file called addresses.txt. Check the source for more info. NOTE: it will probably display a lot of errors when it runs, as most of the initial peers, acquired via DNS, are down.
+This example will connect, then update its view of the blockchain, noting spendables that are paid to the addresses in `~/.wallet/default/watch_addresses`. Check the source for more info. NOTE: it will probably display a lot of errors when it runs, as most of the initial peers, acquired via DNS, are down.
 
 
 Future Direction
 ----------------
 
-More and more standard handling features will be added, especially for functionality whose canonical operation should be clear (like forwarding transactions and blocks between peers).
-
-There is not much built-in support for persistent storage for now beyond the "address keeper" demo.
+More work on the SPV wallet, and features to make it more reliable and more useful as a wallet.
 
 
 Donate
