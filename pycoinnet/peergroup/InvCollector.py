@@ -17,7 +17,7 @@ from pycoinnet.peer.Fetcher import Fetcher
 
 
 class InvCollector:
-    def __init__(self, tx_store={}, block_store={}):
+    def __init__(self):
         self.inv_item_db = {}
         # key: InvItem; value: dictionary of peers to timestamps
 
