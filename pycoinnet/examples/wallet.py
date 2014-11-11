@@ -8,16 +8,16 @@ import os.path
 import sqlite3
 import time
 
-from pycoinnet.helpers.networks import MAINNET
-
-from pycoinnet.util.BlockChainView import BlockChainView
-
-from pycoinnet.examples.spvclient import SPVClient
-from pycoinnet.bloom import BloomFilter, filter_size_required, hash_function_count_required
-
-
+from pycoin.convention import satoshi_to_mbtc
+from pycoin.key.validate import is_address_valid
+from pycoin.tx.tx_utils import create_tx
 from pycoin.wallet.SQLite3Persistence import SQLite3Persistence
 from pycoin.wallet.SQLite3Wallet import SQLite3Wallet
+
+from pycoinnet.bloom import BloomFilter, filter_size_required, hash_function_count_required
+from pycoinnet.examples.spvclient import SPVClient
+from pycoinnet.helpers.networks import MAINNET
+from pycoinnet.util.BlockChainView import BlockChainView
 
 
 def storage_base_path():
@@ -35,17 +35,7 @@ class Keychain(object):
         return spendable.bitcoin_address() in self.interested_addresses
 
 
-def main():
-    parser = argparse.ArgumentParser(description="SPV wallet.")
-    parser.add_argument('-p', "--path", help='The path to the wallet files.')
-    parser.add_argument('-d', "--date", help="Skip ahead to this date.",
-                        type=lambda x: time.strptime(x, '%Y-%m-%d'),
-                        default=datetime.date(2008, 1, 1))
-
-    args = parser.parse_args()
-
-    path = args.path or storage_base_path()
-
+def wallet_fetch(path, args):
     early_timestamp = calendar.timegm(args.date)
 
     print(path)
@@ -105,6 +95,89 @@ def main():
 
     t = asyncio.Task(process_updates(merkle_block_index_queue))
     asyncio.get_event_loop().run_forever()
+
+
+def wallet_balance(path, args):
+    sql_db = sqlite3.Connection(os.path.join(path, "wallet.db"))
+    keychain = Keychain([])
+    persistence = SQLite3Persistence(sql_db)
+    wallet = SQLite3Wallet(keychain, persistence, desired_spendable_count=20)
+    bcv_json = persistence.get_global("blockchain_view") or "[]"
+    blockchain_view = BlockChainView.from_json(bcv_json)
+    last_block = blockchain_view.last_block_index()
+    total = 0
+    for spendable in persistence.unspent_spendables(last_block, confirmations=1):
+        total += spendable.coin_value
+    print("block %d: balance = %s mBTC" % (last_block, satoshi_to_mbtc(total)))
+
+
+def as_payable(payable):
+    address, amount = payable, None
+    if "/" in payable:
+        address, amount = payable.split("/", 1)
+    if not is_address_valid(address):
+        raise argparse.ArgumentTypeError("%s is not a valid address" % address)
+    if amount is not None:
+        return (address, int(amount))
+    return address
+
+
+def wallet_create(path, args):
+    sql_db = sqlite3.Connection(os.path.join(path, "wallet.db"))
+    keychain = Keychain([])
+    persistence = SQLite3Persistence(sql_db)
+    wallet = SQLite3Wallet(keychain, persistence, desired_spendable_count=20)
+
+    bcv_json = persistence.get_global("blockchain_view") or "[]"
+    blockchain_view = BlockChainView.from_json(bcv_json)
+    last_block = blockchain_view.last_block_index()
+
+    # how much are we sending?
+    total_sending = 0
+    for p in args.payable:
+        if len(p) == 2:
+            total_sending += p[-1]
+
+    if total_sending == 0:
+        raise argparse.ArgumentTypeError("you must choose a non-zero amount to send")
+
+    total = 0
+    spendables = []
+    for spendable in persistence.unspent_spendables(last_block, confirmations=1):
+        spendables.append(spendable)
+        total += spendable.coin_value
+        if total >= total_sending:
+            break
+
+    tx = create_tx(spendables, args.payable)
+    print(tx.as_hex())
+
+
+def main():
+    parser = argparse.ArgumentParser(description="SPV wallet.")
+    parser.add_argument('-p', "--path", help='The path to the wallet files.')
+    subparsers = parser.add_subparsers(help="commands", dest='command')
+
+    fetch_parser = subparsers.add_parser('fetch', help='Update to current blockchain view')
+    fetch_parser.add_argument('-d', "--date", help="Skip ahead to this date.",
+                              type=lambda x: time.strptime(x, '%Y-%m-%d'),
+                              default=datetime.date(2008, 1, 1))
+
+    balance_parser = subparsers.add_parser('balance', help='Show wallet balance')
+
+    create_parser = subparsers.add_parser('create', help='Create transaction')
+    create_parser.add_argument('payable', type=as_payable, nargs='+',
+                               help="payable: either a bitcoin address, or a address/amount combo")
+
+    args = parser.parse_args()
+    path = args.path or storage_base_path()
+
+    if args.command == "fetch":
+        wallet_fetch(path, args)
+    if args.command == "balance":
+        wallet_balance(path, args)
+    if args.command == "create":
+        wallet_create(path, args)
 
 
 if __name__ == '__main__':
