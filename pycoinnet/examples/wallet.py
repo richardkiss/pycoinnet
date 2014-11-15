@@ -3,7 +3,9 @@
 import argparse
 import asyncio
 import calendar
+import codecs
 import datetime
+import io
 import os.path
 import sqlite3
 import sys
@@ -11,6 +13,7 @@ import time
 
 from pycoin.convention import satoshi_to_mbtc
 from pycoin.key.validate import is_address_valid
+from pycoin.tx import Tx
 from pycoin.tx.tx_utils import create_tx
 from pycoin.wallet.SQLite3Persistence import SQLite3Persistence
 from pycoin.wallet.SQLite3Wallet import SQLite3Wallet
@@ -161,6 +164,24 @@ def wallet_create(path, args):
         tx.stream(f)
         tx.stream_unspents(f)
 
+
+def wallet_exclude(path, args):
+    sql_db = sqlite3.Connection(os.path.join(path, "wallet.db"))
+    persistence = SQLite3Persistence(sql_db)
+
+    with open(args.path_to_tx, "rb") as f:
+        if f.name.endswith("hex"):
+            f = io.BytesIO(codecs.getreader("hex_codec")(f).read())
+        tx = Tx.parse(f)
+
+    for tx_in in tx.txs_in:
+        spendable = persistence.spendable_for_hash_index(tx_in.previous_hash, tx_in.previous_index)
+        if spendable:
+            spendable.does_seem_spent = True
+            persistence.save_spendable(spendable)
+    persistence.commit()
+
+
 def main():
     parser = argparse.ArgumentParser(description="SPV wallet.")
     parser.add_argument('-p', "--path", help='The path to the wallet files.')
@@ -180,6 +201,9 @@ def main():
     create_parser.add_argument('payable', type=as_payable, nargs='+',
                                help="payable: either a bitcoin address, or a address/amount combo")
 
+    exclude_parser = subparsers.add_parser('exclude', help="Exclude spendables from a given transaction")
+    exclude_parser.add_argument('path_to_tx', help="path to transaction")
+
     args = parser.parse_args()
     path = args.path or storage_base_path()
 
@@ -189,6 +213,8 @@ def main():
         wallet_balance(path, args)
     if args.command == "create":
         wallet_create(path, args)
+    if args.command == "exclude":
+        wallet_exclude(path, args)
 
 
 if __name__ == '__main__':
