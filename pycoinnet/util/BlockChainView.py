@@ -114,6 +114,9 @@ class BlockChainView:
         old_node_tuples = self.node_tuples
         self._set_tuples(t for t in old_node_tuples if t[0] in halfsies_indices)
 
+    def rewind(self, new_block_index):
+        self._set_tuples(nt for nt in self.node_tuples if nt[0] <= new_block_index)
+
     def do_headers_improve_path(self, headers):
         """
         Raises ValueError if headers path don't extend from anywhere in this view.

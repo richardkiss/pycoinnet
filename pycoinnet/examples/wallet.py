@@ -6,6 +6,7 @@ import calendar
 import datetime
 import os.path
 import sqlite3
+import sys
 import time
 
 from pycoin.convention import satoshi_to_mbtc
@@ -48,14 +49,19 @@ def wallet_fetch(path, args):
 
     sql_db = sqlite3.Connection(os.path.join(path, "wallet.db"))
     persistence = SQLite3Persistence(sql_db)
-    wallet = SQLite3Wallet(keychain, persistence, desired_spendable_count=20)
+    wallet = SQLite3Wallet(keychain, persistence)
 
     bcv_json = persistence.get_global("blockchain_view") or "[]"
 
     blockchain_view = BlockChainView.from_json(bcv_json)
+    if args.rewind:
+        print("rewinding to block %d" % args.rewind)
+        blockchain_view.rewind(args.rewind)
 
-    element_count = len(addresses)
-    false_positive_probability = 0.0001
+    spendables = list(persistence.unspent_spendables(blockchain_view.last_block_index()))
+
+    element_count = len(addresses) + len(spendables)
+    false_positive_probability = 0.00001
 
     filter_size = filter_size_required(element_count, false_positive_probability)
     hash_function_count = hash_function_count_required(filter_size, element_count)
@@ -65,6 +71,9 @@ def wallet_fetch(path, args):
 
     for a in addresses:
         bloom_filter.add_address(a)
+
+    for s in spendables:
+        bloom_filter.add_spendable(s)
 
     merkle_block_index_queue = asyncio.Queue()
     host_port_q = None
@@ -99,9 +108,7 @@ def wallet_fetch(path, args):
 
 def wallet_balance(path, args):
     sql_db = sqlite3.Connection(os.path.join(path, "wallet.db"))
-    keychain = Keychain([])
     persistence = SQLite3Persistence(sql_db)
-    wallet = SQLite3Wallet(keychain, persistence, desired_spendable_count=20)
     bcv_json = persistence.get_global("blockchain_view") or "[]"
     blockchain_view = BlockChainView.from_json(bcv_json)
     last_block = blockchain_view.last_block_index()
@@ -124,9 +131,7 @@ def as_payable(payable):
 
 def wallet_create(path, args):
     sql_db = sqlite3.Connection(os.path.join(path, "wallet.db"))
-    keychain = Keychain([])
     persistence = SQLite3Persistence(sql_db)
-    wallet = SQLite3Wallet(keychain, persistence, desired_spendable_count=20)
 
     bcv_json = persistence.get_global("blockchain_view") or "[]"
     blockchain_view = BlockChainView.from_json(bcv_json)
@@ -149,9 +154,12 @@ def wallet_create(path, args):
         if total >= total_sending:
             break
 
-    tx = create_tx(spendables, args.payable)
-    print(tx.as_hex())
+    print("found %d coins which exceed %d" % (total, total_sending))
 
+    tx = create_tx(spendables, args.payable)
+    with open(args.output, "wb") as f:
+        tx.stream(f)
+        tx.stream_unspents(f)
 
 def main():
     parser = argparse.ArgumentParser(description="SPV wallet.")
@@ -161,11 +169,14 @@ def main():
     fetch_parser = subparsers.add_parser('fetch', help='Update to current blockchain view')
     fetch_parser.add_argument('-d', "--date", help="Skip ahead to this date.",
                               type=lambda x: time.strptime(x, '%Y-%m-%d'),
-                              default=datetime.date(2008, 1, 1))
+                              default=time.strptime('2008-01-01', '%Y-%m-%d'))
+
+    fetch_parser.add_argument('-r', "--rewind", help="Rewind to this block index.", type=int)
 
     balance_parser = subparsers.add_parser('balance', help='Show wallet balance')
 
     create_parser = subparsers.add_parser('create', help='Create transaction')
+    create_parser.add_argument("-o", "--output", type=str, help="name of tx output file", required=True)
     create_parser.add_argument('payable', type=as_payable, nargs='+',
                                help="payable: either a bitcoin address, or a address/amount combo")
 
