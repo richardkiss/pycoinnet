@@ -47,7 +47,7 @@ class SPVClient(object):
     merkleblocks_for_headers
     """
 
-    def __init__(self, network, initial_blockchain_view, bloom_filter, merkle_block_index_queue,
+    def __init__(self, network, initial_blockchain_view, bloom_filter, block_index_queue=None,
                  filter_f=lambda idx, h: True, host_port_q=None):
         """
         network:
@@ -56,8 +56,8 @@ class SPVClient(object):
             BlockChainView instance which is update automatically
         bloom_filter:
             the filter sent to remotes
-        merkle_block_index_queue:
-            a Queue which is fed with (merkleblock, index) items which need to be processed
+        block_index_queue:
+            a Queue which is fed with (block, index) items which need to be processed
         host_port_q:
             a Queue that is being fed potential places to connect
         """
@@ -69,11 +69,19 @@ class SPVClient(object):
         self.blockchain_view = initial_blockchain_view
         self.bloom_filter = bloom_filter
 
-        self.merkle_block_futures = asyncio.Queue(maxsize=2000)
-        self.feed_task = asyncio.Task(self.feed_merkle_blocks(merkle_block_index_queue))
+        self.block_futures = asyncio.Queue(maxsize=2000)
+        if block_index_queue is None:
+            block_index_queue = asyncio.Queue()
+        self._block_index_queue = block_index_queue
+        self.feed_task = asyncio.Task(self.feed_blocks())
 
         self.blockfetcher = Blockfetcher()
         self.inv_collector = InvCollector()
+
+        if bloom_filter:
+            self.get_future = self.blockfetcher.get_merkle_block_future
+        else:
+            self.get_future = self.blockfetcher.get_block_future
 
         self.filter_f = filter_f
 
@@ -90,12 +98,13 @@ class SPVClient(object):
                 peer, local_port=0, last_block_index=last_block_index, nonce=self.nonce,
                 subversion=self.subversion)
             version_data = yield from initial_handshake(peer, version_parameters)
-            filter_bytes, hash_function_count, tweak = self.bloom_filter.filter_load_params()
-            # TODO: figure out flags
-            flags = 0
-            peer.send_msg(
-                "filterload", filter=filter_bytes, hash_function_count=hash_function_count,
-                tweak=tweak, flags=flags)
+            if self.bloom_filter:
+                filter_bytes, hash_function_count, tweak = self.bloom_filter.filter_load_params()
+                # TODO: figure out flags
+                flags = 0
+                peer.send_msg(
+                    "filterload", filter=filter_bytes, hash_function_count=hash_function_count,
+                    tweak=tweak, flags=flags)
             last_block_index = version_data["last_block_index"]
             getheaders_add_peer(peer, last_block_index)
             blockfetcher.add_peer(peer, fetcher, last_block_index)
@@ -114,59 +123,22 @@ class SPVClient(object):
         self.show_task = asyncio.Task(show_connection_info(self.connection_info_q))
 
     @asyncio.coroutine
-    def feed_merkle_blocks(self, merkle_block_index_queue):
+    def feed_blocks(self):
         while 1:
-            index, future = yield from self.merkle_block_futures.get()
-            merkle_block = yield from future
-            yield from merkle_block_index_queue.put([merkle_block, index])
+            index, future = yield from self.block_futures.get()
+            block = yield from future
+            yield from self._block_index_queue.put([block, index])
 
     @asyncio.coroutine
     def handle_reorg(self, block_number, headers):
         for idx, h in enumerate(headers):
-            if self.filter_f(idx, h):
-                f = self.blockfetcher.get_merkle_block_future(h.hash(), block_number+idx)
+            if self.filter_f(block_number+idx, h):
+                f = self.get_future(h.hash(), block_number+idx)
             else:
                 h.txs = []
                 f = asyncio.Future()
                 f.set_result(h)
-            yield from self.merkle_block_futures.put([block_number+idx, f])
+            yield from self.block_futures.put([block_number+idx, f])
 
-
-def main():
-    logging.basicConfig(
-        level=logging.DEBUG,
-        format=('%(asctime)s [%(process)d] [%(levelname)s] '
-                '%(filename)s:%(lineno)d %(message)s'))
-
-    from pycoinnet.helpers.networks import MAINNET
-    from pycoinnet.util.BlockChainView import BlockChainView
-    from pycoinnet.bloom import BloomFilter
-    from pycoin.tx import Spendable
-    from pycoin.serialize import h2b_rev, h2b
-    network = MAINNET
-    initial_blockchain_view = BlockChainView()
-    bloom_filter = BloomFilter(2048, hash_function_count=8, tweak=3)
-    bloom_filter.add_address("14gZfnEn8Xd3ofkjr5s7rKoC3bi8J4Yfyy")
-    # bloom_filter.add_address("1GL6i1ty44RnERgqYLKS1CrnhrahW4JhQZ")
-    bloom_filter.add_item(h2b("0478abb18c0c7c95348fa77eb5fd43ce963e450d797cf4878894230ca528e6c8e866c3"
-                              "8ad93746e04f2161a01787c82a858ee24940e9a06e41fddb3494dfe29380"))
-    spendable = Spendable(
-        0, b'', h2b_rev("0437cd7f8525ceed2324359c2d0ba26006d92d856a9c20fa0241106ee5a597c9"), 0)
-    bloom_filter.add_spendable(spendable)
-    merkle_block_index_queue = asyncio.Queue()
-    spv = SPVClient(
-        network, initial_blockchain_view, bloom_filter, merkle_block_index_queue, host_port_q=None)
-
-    def fetch(merkle_block_index_queue):
-        while True:
-            merkle_block, index = yield from merkle_block_index_queue.get()
-            logging.info(
-                "block #%d %s with %d transactions", index, merkle_block.id(), len(merkle_block.txs))
-
-    t = asyncio.Task(fetch(merkle_block_index_queue))
-
-    asyncio.get_event_loop().run_forever()
-
-
-if __name__ == '__main__':
-    main()
+    def block_index_queue(self):
+        return self._block_index_queue
