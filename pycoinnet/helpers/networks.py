@@ -16,6 +16,6 @@ TESTNET = dict(
     DNS_BOOTSTRAP = [
         "bitcoin.petertodd.org", "testnet-seed.bitcoin.petertodd.org",
         "bluematt.me", "testnet-seed.bluematt.me"
-    ]
+    ],
     DEFAULT_PORT = 18333,
 )
