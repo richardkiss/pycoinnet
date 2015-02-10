@@ -7,7 +7,8 @@ MAINNET = dict(
     DNS_BOOTSTRAP = [
         "seed.bitcoin.sipa.be", "dnsseed.bitcoin.dashjr.org"
         "bitseed.xf2.org", "dnsseed.bluematt.me",
-    ]
+    ],
+    DEFAULT_PORT = 8333,
 )
 
 TESTNET = dict(
@@ -16,4 +17,5 @@ TESTNET = dict(
         "bitcoin.petertodd.org", "testnet-seed.bitcoin.petertodd.org",
         "bluematt.me", "testnet-seed.bluematt.me"
     ]
+    DEFAULT_PORT = 18333,
 )

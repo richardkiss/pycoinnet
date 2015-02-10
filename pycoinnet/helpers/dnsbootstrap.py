@@ -24,7 +24,7 @@ def dns_bootstrap_host_port_q(network_info):
     def bootstrap_superpeer_addresses(dns_bootstrap):
         for h in dns_bootstrap:
             try:
-                r = yield from asyncio.get_event_loop().getaddrinfo(h, 8333)
+                r = yield from asyncio.get_event_loop().getaddrinfo(h, network_info["DEFAULT_PORT"])
                 results = set(t[-1][:2] for t in r)
                 for t in results:
                     yield from superpeer_ip_queue.put(t)
