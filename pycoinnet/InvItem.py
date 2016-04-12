@@ -3,6 +3,7 @@ from pycoin.serialize.bitcoin_streamer import parse_struct, stream_struct
 
 ITEM_TYPE_TX, ITEM_TYPE_BLOCK, ITEM_TYPE_MERKLEBLOCK = (1, 2, 3)
 
+
 class InvItem(object):
     def __init__(self, item_type, data):
         self.item_type = item_type

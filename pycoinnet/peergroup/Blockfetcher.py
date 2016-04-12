@@ -8,16 +8,14 @@
 
 # it goes to the list of known peers who have the blocks in question
 
-#manages block peers
+# manages block peers
 # fetch block
 
 import asyncio
 import logging
 import time
-import weakref
 
 from pycoinnet.InvItem import InvItem, ITEM_TYPE_BLOCK, ITEM_TYPE_MERKLEBLOCK
-from pycoinnet.peer.Fetcher import Fetcher
 
 
 class Blockfetcher:

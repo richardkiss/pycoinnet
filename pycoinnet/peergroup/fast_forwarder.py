@@ -63,7 +63,7 @@ def fast_forwarder_add_peer_f(blockchain):
                 priority = - rate_dict["records"] / rate_dict["total_seconds"]
                 # let's make sure we actually extend the chain
                 ops = blockchain.add_headers(headers)
-                ## this hack is necessary because the stupid default client
+                # ## this hack is necessary because the stupid default client
                 # does not send the genesis block!
                 try:
                     while len(ops) == 0:

@@ -51,7 +51,7 @@ class BlockHandler:
         self.block_store = block_store
         self.q = inv_collector.new_inv_item_queue()
         self._watch_invcollector_task = asyncio.Task(self._watch_invcollector(block_validator))
-        #asyncio.Task(self._watch_block_chain(block_chain.new_change_q(), should_download_f))
+        # asyncio.Task(self._watch_block_chain(block_chain.new_change_q(), should_download_f))
 
     @asyncio.coroutine
     def _watch_block_chain(self, change_q, should_download_f):
@@ -83,7 +83,7 @@ class BlockHandler:
                 if block is None:
                     break
                 headers.append((_header_for_block(block), 0))
-        ## TODO: handle other case where hash_stop != b'\0' * 32
+        # ## TODO: handle other case where hash_stop != b'\0' * 32
         return headers
 
     def add_peer(self, peer):
@@ -97,9 +97,9 @@ class BlockHandler:
                 if name == 'getblocks':
                     continue
                     # TODO: get this working
-                    block_hashes = _prep_block_hashes(data.get("hash_stop"))
-                    if block_hashes:
-                        peer.send_msg("headers", headers=block_hashes)
+                    # block_hashes = _prep_block_hashes(data.get("hash_stop"))
+                    # if block_hashes:
+                    #    peer.send_msg("headers", headers=block_hashes)
                 if name == 'getheaders':
                     headers = self._prep_headers(data.get("hash_stop"))
                     if headers:

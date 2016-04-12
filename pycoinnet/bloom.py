@@ -1,7 +1,3 @@
-#The size S of the filter in bytes is given by (-1 / pow(log(2), 2) * N * log(P)) / 8. Of course you must ensure it does not go over the maximum size (36,000: selected as it represents a filter of 20,000 items with false positive rate of < 0.1% or 10,000 items and a false positive rate of < 0.0001%).
-
-#The number of hash functions required is given by S * 8 / N * log(2).
-
 import math
 import struct
 
@@ -9,11 +5,19 @@ from pycoin.encoding import bitcoin_address_to_hash160_sec
 
 LOG_2 = math.log(2)
 
+
 def filter_size_required(element_count, false_positive_probability):
-    return min(36000, int(((-1 / pow(LOG_2, 2) * element_count * math.log(false_positive_probability))+7) // 8))
+    # The size S of the filter in bytes is given by
+    # (-1 / pow(log(2), 2) * N * log(P)) / 8
+    # Of course you must ensure it does not go over the maximum size
+    # (36,000: selected as it represents a filter of 20,000 items with false
+    # positive rate of < 0.1% or 10,000 items and a false positive rate of < 0.0001%).
+    lfpp = math.log(false_positive_probability)
+    return min(36000, int(((-1 / pow(LOG_2, 2) * element_count * lfpp)+7) // 8))
 
 
 def hash_function_count_required(filter_size, element_count):
+    # The number of hash functions required is given by S * 8 / N * log(2).
     return int(filter_size * 8 / element_count * LOG_2 + 0.5)
 
 
@@ -67,16 +71,16 @@ def murmur3(data, seed=0):
     h1 = seed
     roundedEnd = (length & 0xfffffffc)  # round down to 4 byte block
     for i in range(0, roundedEnd, 4):
-      # little endian load order
-      k1 = (data[i] & 0xff) | ((data[i + 1] & 0xff) << 8) | \
-           ((data[i + 2] & 0xff) << 16) | (data[i + 3] << 24)
-      k1 *= c1
-      k1 = (k1 << 15) | ((k1 & 0xffffffff) >> 17) # ROTL32(k1,15)
-      k1 *= c2
+        # little endian load order
+        k1 = (data[i] & 0xff) | ((data[i + 1] & 0xff) << 8) | \
+            ((data[i + 2] & 0xff) << 16) | (data[i + 3] << 24)
+        k1 *= c1
+        k1 = (k1 << 15) | ((k1 & 0xffffffff) >> 17)  # ROTL32(k1,15)
+        k1 *= c2
 
-      h1 ^= k1
-      h1 = (h1 << 13) | ((h1 & 0xffffffff) >> 19)  # ROTL32(h1,13)
-      h1 = h1 * 5 + 0xe6546b64
+        h1 ^= k1
+        h1 = (h1 << 13) | ((h1 & 0xffffffff) >> 19)  # ROTL32(h1,13)
+        h1 = h1 * 5 + 0xe6546b64
 
     # tail
     k1 = 0

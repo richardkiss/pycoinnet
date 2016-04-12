@@ -8,7 +8,6 @@ import datetime
 import io
 import os.path
 import sqlite3
-import sys
 import time
 
 from pycoin.convention import satoshi_to_mbtc
@@ -70,7 +69,8 @@ def wallet_fetch(path, args):
     hash_function_count = hash_function_count_required(filter_size, element_count)
     bloom_filter = BloomFilter(filter_size, hash_function_count=hash_function_count, tweak=1)
 
-    print("%d elements; filter size: %d bytes; %d hash functions" % (element_count, filter_size, hash_function_count))
+    print("%d elements; filter size: %d bytes; %d hash functions" % (
+            element_count, filter_size, hash_function_count))
 
     for a in addresses:
         bloom_filter.add_address(a)
@@ -85,7 +85,11 @@ def wallet_fetch(path, args):
         # use a local host instead of going to DNS
         host_port_q = asyncio.Queue()
         host_port_q.put_nowait(("127.0.0.1", 8333))
-    filter_f = lambda idx, h: h.timestamp >= early_timestamp
+
+    def filter_f(idx, h):
+        return h.timestamp >= early_timestamp
+
+    # this spv value probably needs to be kept on the stack so the SPVClient is not GCed
     spv = SPVClient(
         network, blockchain_view, bloom_filter, merkle_block_index_queue, host_port_q=host_port_q,
         filter_f=filter_f)
@@ -101,10 +105,12 @@ def wallet_fetch(path, args):
                 print("got block %06d: %s... with %d transactions" % (
                     index, merkle_block.id()[:32], len(merkle_block.txs)))
             if index % 1000 == 0:
-                print("at block %06d (%s)" % (index, datetime.datetime.fromtimestamp(merkle_block.timestamp)))
+                print("at block %06d (%s)" % (
+                        index, datetime.datetime.fromtimestamp(merkle_block.timestamp)))
             if merkle_block_index_queue.empty():
                 persistence.commit()
 
+    # we need to keep the task around in the stack context or it will be GCed
     t = asyncio.Task(process_updates(merkle_block_index_queue))
     asyncio.get_event_loop().run_forever()
 
@@ -194,7 +200,7 @@ def main():
 
     fetch_parser.add_argument('-r', "--rewind", help="Rewind to this block index.", type=int)
 
-    balance_parser = subparsers.add_parser('balance', help='Show wallet balance')
+    subparsers.add_parser('balance', help='Show wallet balance')
 
     create_parser = subparsers.add_parser('create', help='Create transaction')
     create_parser.add_argument("-o", "--output", type=str, help="name of tx output file", required=True)

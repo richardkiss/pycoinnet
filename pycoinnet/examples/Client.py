@@ -116,8 +116,8 @@ class Client(object):
         def run_peer(peer, fetcher, fast_forward_add_peer, blockfetcher, inv_collector, blockhandler):
             yield from asyncio.wait_for(peer.connection_made_future, timeout=None)
             version_parameters = version_data_for_peer(
-                peer, local_port=(server_port or 0), last_block_index=block_chain.length(), nonce=self.nonce,
-                subversion=self.subversion)
+                peer, local_port=(server_port or 0), last_block_index=block_chain.length(),
+                nonce=self.nonce, subversion=self.subversion)
             version_data = yield from initial_handshake(peer, version_parameters)
             last_block_index = version_data["last_block_index"]
             fast_forward_add_peer(peer, last_block_index)
@@ -141,12 +141,11 @@ class Client(object):
         @asyncio.coroutine
         def run_listener():
             abstract_server = None
-            future_peer = asyncio.Future()
             try:
                 abstract_server = yield from asyncio.get_event_loop().create_server(
                     protocol_factory=create_protocol_callback, port=server_port)
                 return abstract_server
-            except OSError as ex:
+            except OSError:
                 logging.info("can't listen on port %d", server_port)
 
         if server_port:

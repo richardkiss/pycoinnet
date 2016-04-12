@@ -108,7 +108,7 @@ def connect_to_remote(event_loop, magic_header, address_db, connections):
         logging.info("connected to %s:%d", host, port)
         yield from asyncio.wait_for(peer.connection_made_future, timeout=None)
         version_parameters = version_data_for_peer(peer)
-        version_data = yield from initial_handshake(peer, version_parameters)
+        yield from initial_handshake(peer, version_parameters)
         AddressKeeper(peer, address_db)
         address_db.add_address(host, port, int(time.time()))
         connections.add(peer)
@@ -139,6 +139,8 @@ def main():
         format=('%(asctime)s [%(process)d] [%(levelname)s] '
                 '%(filename)s:%(lineno)d %(message)s'))
     event_loop = asyncio.get_event_loop()
+    # kmc_task is never used, but if we don't keep a reference, the
+    # Task is collected (and stops)
     kmc_task = asyncio.Task(keep_minimum_connections(event_loop))
     event_loop.run_forever()
 

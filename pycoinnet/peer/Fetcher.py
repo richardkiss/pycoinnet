@@ -39,7 +39,7 @@ class Fetcher:
 
     def queue_size(self):
         pass
-        ## TODO: finish
+        # ## TODO: finish
 
     @asyncio.coroutine
     def _getdata_loop(self):
@@ -62,28 +62,33 @@ class Fetcher:
                 if name in ITEM_LOOKUP:
                     item = data[ITEM_LOOKUP[name]]
                     the_hash = item.hash()
-                    TYPE_DB = { "tx" : ITEM_TYPE_TX, "block" : ITEM_TYPE_BLOCK, "merkleblock" : ITEM_TYPE_MERKLEBLOCK }
+                    TYPE_DB = {"tx": ITEM_TYPE_TX,
+                               "block": ITEM_TYPE_BLOCK,
+                               "merkleblock": ITEM_TYPE_MERKLEBLOCK}
                     the_type = TYPE_DB[name]
                     inv_item = InvItem(the_type, the_hash)
+                    future = self.futures.get(inv_item)
                     if name == "merkleblock":
                         txs = []
                         for h in data["tx_hashes"]:
                             name, data = yield from next_message()
                             if name != "tx":
-                                logging.error("insufficient tx messages after merkleblock message: missing %s", b2h_rev(h))
+                                logging.error(
+                                    "insufficient tx messages after merkleblock message: missing %s",
+                                    b2h_rev(h))
                                 del self.futures[inv_item]
                                 future.set_result(None)
                                 break
                             tx = data["tx"]
                             if tx.hash() != h:
-                                logging.error("missing tx message after merkleblock message: missing %s", b2h_rev(h))
+                                logging.error(
+                                    "missing tx message after merkleblock message: missing %s", b2h_rev(h))
                                 del self.futures[inv_item]
                                 future.set_result(None)
                                 break
                             txs.append(tx)
                         item.txs = txs
-                    future = self.futures.get(inv_item)
-                    if future:
+                    if future is not None:
                         del self.futures[inv_item]
                         if not future.done():
                             future.set_result(item)

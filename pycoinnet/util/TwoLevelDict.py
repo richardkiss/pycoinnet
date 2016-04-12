@@ -8,6 +8,7 @@ When an item is referenced, it's moved back into the first level.
 
 import collections.abc
 
+
 class TwoLevelDict(collections.abc.MutableMapping):
     def __init__(self, *args, **kwargs):
         self.dict = dict(*args, **kwargs)

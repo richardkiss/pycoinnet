@@ -10,12 +10,13 @@ import logging
 import os
 import time
 
+from pycoinnet.InvItem import ITEM_TYPE_BLOCK
 from pycoinnet.examples.Client import Client
 
 from pycoinnet.util.BlockChainStore import BlockChainStore
 
 from pycoinnet.helpers.dnsbootstrap import dns_bootstrap_host_port_q
-from pycoinnet.helpers.networks import MAINNET, TESTNET
+from pycoinnet.helpers.networks import MAINNET
 
 
 def write_block_to_disk(blockdir, block, block_index):
@@ -93,16 +94,6 @@ def block_processor(change_q, blockfetcher, state_dir, blockdir, depth):
                 break
         os.rename(tmp_timed_blockdir, timed_blockdir)
 
-@asyncio.coroutine
-def run_peer(peer, fetcher, fast_forward_add_peer, blockfetcher, inv_collector, blockhandler):
-    yield from asyncio.wait_for(peer.connection_made_future, timeout=None)
-    version_parameters = version_data_for_peer(peer)
-    version_data = yield from initial_handshake(peer, version_parameters)
-    last_block_index = version_data["last_block_index"]
-    fast_forward_add_peer(peer, last_block_index)
-    blockfetcher.add_peer(peer, fetcher, last_block_index)
-    inv_collector.add_peer(peer)
-    blockhandler.add_peer(peer)
 
 def block_chain_locker_callback(block_chain, ops):
     LOCKED_MULTIPLE = 32
@@ -112,6 +103,7 @@ def block_chain_locker_callback(block_chain, ops):
     if unlocked_length > LOCKED_MULTIPLE:
         new_locked_length = total_length - (total_length % LOCKED_MULTIPLE) - LOCKED_MULTIPLE
         block_chain.lock_to_index(new_locked_length)
+
 
 @asyncio.coroutine
 def new_block_fetcher(inv_collector, block_chain):
@@ -126,6 +118,7 @@ def new_block_fetcher(inv_collector, block_chain):
 
 LOG_FORMAT = ('%(asctime)s [%(process)d] [%(levelname)s] '
               '%(filename)s:%(lineno)d %(message)s')
+
 
 def log_file(logPath, level=logging.NOTSET):
     new_log = logging.FileHandler(logPath)
@@ -159,13 +152,6 @@ def main():
 
     state_dir = args.state_dir
     block_chain_store = BlockChainStore(state_dir)
-    block_chain = BlockChain(did_lock_to_index_f=block_chain_store.did_lock_to_index)
-
-    block_chain.add_change_callback(block_chain_locker_callback)
-
-    blockfetcher = Blockfetcher()
-    inv_collector = InvCollector()
-
     network = MAINNET
 
     if 1:
@@ -174,7 +160,8 @@ def main():
         host_port_q = asyncio.Queue()
         host_port_q.put_nowait(("127.0.0.1", 8333))
 
-    should_download_block_f = lambda block_hash, block_index: block_index >= args.fast_forward
+    def should_download_block_f(block_hash, block_index):
+        return block_index >= args.fast_forward
 
     last_processed_block = max(get_last_processed_block(state_dir), args.fast_forward)
     update_last_processed_block(state_dir, last_processed_block)
@@ -185,18 +172,16 @@ def main():
     def do_update(blockchain, ops):
         _update_q(change_q, [list(o) for o in ops])
 
-block_chain.add_change_callback(do_update)
-    block_chain.add_nodes(block_chain_store.block_tuple_iterator())
-
-    block_processor_task = asyncio.Task(
-        block_processor(
-            change_q, blockfetcher, state_dir, args.blockdir, args.depth))
+    # block_chain.add_change_callback(do_update)
+    # block_chain.add_nodes(block_chain_store.block_tuple_iterator())
 
     client = Client(
         network, host_port_q, should_download_block_f, block_chain_store, do_update)
 
     blockfetcher = client.blockfetcher
 
+    # we need to keep block_processor_task referenced in this stack context
+    # or the task will be garbage collected
     block_processor_task = asyncio.Task(
         block_processor(
             change_q, blockfetcher, state_dir, args.blockdir, args.depth))
