@@ -1,0 +1,10 @@
+The pycoinnet library uses py.teset for testing.
+
+If you want to hack on it, it's recommended that you to install py.test and tox in your development virtualenv.
+
+$ pip install pytest
+
+To run just a subset of tests for features under development do something like:
+
+$ cd (project_root_dir)
+$ PYTHONPATH=`pwd` py.test tests/scripts_test.py

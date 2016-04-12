@@ -9,8 +9,8 @@ from pycoinnet.peer.BitcoinPeerProtocol import BitcoinPeerProtocol, BitcoinProto
 from pycoinnet.peer.Fetcher import Fetcher
 from pycoinnet.PeerAddress import PeerAddress
 
-from pycoinnet.util.tests.helper import make_hash, make_tx
-from pycoinnet.peer.tests.helper import PeerTransport, MAGIC_HEADER, VERSION_MSG_BIN, VERSION_MSG, VERSION_MSG, VERSION_MSG_2, VERACK_MSG_BIN, create_peers
+from tests.helper import make_hash, make_tx
+from tests.peer.helper import PeerTransport, MAGIC_HEADER, VERSION_MSG_BIN, VERSION_MSG, VERSION_MSG, VERSION_MSG_2, VERACK_MSG_BIN, create_peers
 
 def create_handshaked_peers():
     peer1, peer2 = create_peers()

@@ -1,8 +1,7 @@
 import asyncio
 
 from pycoinnet.peer.BitcoinPeerProtocol import BitcoinPeerProtocol
-from pycoinnet.peer.tests.helper import PeerTransport, MAGIC_HEADER, VERSION_MSG_BIN, VERSION_MSG, VERSION_MSG, VERSION_MSG_2, VERACK_MSG_BIN
-
+from tests.peer.helper import PeerTransport, MAGIC_HEADER, VERSION_MSG_BIN, VERSION_MSG, VERSION_MSG, VERSION_MSG_2, VERACK_MSG_BIN
 
 def test_BitcoinPeerProtocol_send():
     DATA = []

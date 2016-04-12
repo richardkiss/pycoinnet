@@ -5,8 +5,8 @@ from pycoinnet.peergroup.TxHandler import TxHandler
 
 from pycoinnet.peer.BitcoinPeerProtocol import BitcoinPeerProtocol
 
-from pycoinnet.peer.tests.helper import create_handshaked_peers
-from pycoinnet.util.tests.helper import make_tx
+from tests.helper import make_tx
+from tests.peer.helper import create_handshaked_peers
 
 
 def test_TxHandler_simple():

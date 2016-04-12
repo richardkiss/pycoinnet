@@ -1,3 +1,3 @@
 #!/bin/sh
 
-PYTHONPATH=`pwd` py.test pycoinnet
+PYTHONPATH=`pwd` py.test tests

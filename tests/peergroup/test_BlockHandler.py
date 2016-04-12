@@ -4,16 +4,16 @@ from pycoinnet.util.debug_help import asyncio
 
 from pycoinnet.helpers import standards
 
-from pycoinnet.peer.tests.helper import create_handshaked_peers, handshake_peers, MAGIC_HEADER, create_peers_tcp
 from pycoinnet.peergroup.InvCollector import InvCollector
 from pycoinnet.peergroup.BlockHandler import BlockHandler
-
-from pycoinnet.util.tests.helper import make_blocks
 
 from pycoinnet.InvItem import InvItem, ITEM_TYPE_BLOCK
 
 from pycoinnet.peergroup.Blockfetcher import Blockfetcher
 from pycoinnet.peergroup.fast_forwarder import fast_forwarder_add_peer_f
+
+from tests.peer.helper import create_handshaked_peers, handshake_peers, MAGIC_HEADER, create_peers_tcp
+from tests.helper import make_blocks
 
 
 def test_BlockHandler_simple():

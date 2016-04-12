@@ -1,7 +1,7 @@
 import logging
 
-from pycoinnet.util.tests.helper import make_blocks, make_headers
 from pycoinnet.util.BlockChainView import BlockChainView
+from tests.helper import make_blocks, make_headers
 
 def test1():
     bcv = BlockChainView()
