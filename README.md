@@ -3,7 +3,7 @@ pycoinnet -- Speaking the Bitcoin Protocol
 
 The pycoinnet library is designed for use in conjunction with the Python pycoin library. It provides utilities and examples for writing tools in pure Python that speak the bitcoin protocol on the bitcoin network.
 
-Note that is uses the new asyncio library included in Python 3.4 (and available from pypi in Python 3.3 -- type "pip install asyncio"), and so requires Python 3.3 or higher (unlike pycoin, which supports Python 2.7).
+Note that it uses the new asyncio library included in Python 3.4 (and available from pypi in Python 3.3 -- type "pip install asyncio"), and so requires Python 3.3 or higher (unlike pycoin, which supports Python 2.7).
 
 
 Install
@@ -30,7 +30,7 @@ $ pip install -r requirements.txt
 $ pip install .
 ```
 
-Nothing here really pycoinnet-specific except the dependancy on pycoin.
+Nothing here really pycoinnet-specific except the dependency on pycoin.
 
 
 Try the SPV Demo
