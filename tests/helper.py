@@ -30,8 +30,9 @@ def make_headers(count, header=None):
     tweak = last_hash
     headers = []
     for i in range(count):
-        headers.append(BlockHeader(version=1, previous_block_hash=last_hash, merkle_root=make_hash(i, tweak),
-                       timestamp=GENESIS_TIME+i*600, difficulty=DEFAULT_DIFFICULTY, nonce=i*137))
+        headers.append(
+            BlockHeader(version=1, previous_block_hash=last_hash, merkle_root=make_hash(i, tweak),
+                        timestamp=GENESIS_TIME+i*600, difficulty=DEFAULT_DIFFICULTY, nonce=i*137))
         last_hash = headers[-1].hash()
     return headers
 
@@ -40,7 +41,7 @@ def make_block(index):
     s = index*30000
     txs = [make_tx(i) for i in range(s, s+8)]
     block = Block(version=1, previous_block_hash=b'\0'*32, merkle_root=b'\0'*32,
-                  timestamp=GENESIS_TIME+i, difficulty=s, nonce=s, txs=txs)
+                  timestamp=GENESIS_TIME+index, difficulty=s, nonce=s, txs=txs)
     return block
 
 

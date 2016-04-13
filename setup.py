@@ -17,11 +17,9 @@ setup(
         "pycoinnet.peergroup",
         "pycoinnet.util",
     ],
-    entry_points = { 'console_scripts':
-        [
-            'blockwatcher = pycoinnet.examples.blockwatcher:main',
-        ]
-    },
+    entry_points={'console_scripts': [
+        'blockwatcher = pycoinnet.examples.blockwatcher:main',
+    ]},
     install_requires=REQUIREMENTS,
     author="Richard Kiss",
     author_email="him@richardkiss.com",
