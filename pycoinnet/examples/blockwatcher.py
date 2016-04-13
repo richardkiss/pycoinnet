@@ -52,7 +52,8 @@ def block_processor(change_q, blockfetcher, state_dir, blockdir, depth):
     last_processed_block = get_last_processed_block(state_dir)
     block_q = asyncio.Queue()
     while True:
-        add_remove, block_hash, block_index = yield from change_q.get()
+        add_remove, block_header, block_index = yield from change_q.get()
+        block_hash = block_header.hash()
         if add_remove == "remove":
             the_other = block_q.pop()
             if the_other[1:] != (block_hash, block_index):

@@ -14,7 +14,7 @@ from pycoinnet.helpers.standards import version_data_for_peer
 from pycoinnet.peer.BitcoinPeerProtocol import BitcoinPeerProtocol
 
 
-def dns_bootstrap_host_port_q(network_info, getaddrinfo):
+def dns_bootstrap_host_port_q(network_info, getaddrinfo=asyncio.get_event_loop().getaddrinfo):
     """
     Accepts network_info type (from pycoinnet.helpers.networks) and returns an asyncio.queue.
 

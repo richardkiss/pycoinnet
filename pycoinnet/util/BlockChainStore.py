@@ -55,8 +55,7 @@ class BlockChainStore:
             f.seek(start_index*32)
             count = 0
             # ## TODO: make sure the one we're writing is in the right place
-            for header in block_tuple_list:
-                the_hash = header.hash()
+            for the_hash, parent_hash, weight in block_tuple_list:
                 f.write(the_hash)
                 count += 1
             logging.debug("wrote %d items to block chain store at %s", count, self.dir_path)
