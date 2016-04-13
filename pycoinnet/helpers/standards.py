@@ -62,7 +62,7 @@ def create_server(protocol_factory, port):
 def version_data_for_peer(
         peer, version=70001, local_ip="127.0.0.1", local_port=6111, last_block_index=0,
         nonce=None, subversion=b"/Notoshi/", timestamp=None, want_relay=True):
-    remote_ip, remote_port = peer.peername
+    remote_ip, remote_port = peer.peername[:2]
     remote_addr = PeerAddress(1, remote_ip, remote_port)
     local_addr = PeerAddress(1, local_ip, local_port)
     nonce = nonce or int.from_bytes(os.urandom(8), byteorder="big")
