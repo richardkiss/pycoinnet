@@ -134,6 +134,42 @@ def test_simple():
     loop.close()
 
 
+def test_filter():
+    v = 0
+
+    loop = asyncio.new_event_loop()
+
+    @asyncio.coroutine
+    def get_next():
+        yield from asyncio.sleep(0.01, loop=loop)
+        nonlocal v
+        v += 1
+        return v
+
+    mp = Multiplexer(get_next, loop=loop)
+    q1_get = mp.new_q()
+    q2_get = mp.new_q(filter_f=lambda v: v % 2 == 0)
+    q3_get = mp.new_q(filter_f=lambda v: v % 3 == 0)
+
+    for r in range(10):
+        k = loop.run_until_complete(asyncio.ensure_future(q1_get(), loop=loop))
+        assert k == r + 1
+
+    for r in range(10):
+        k = loop.run_until_complete(asyncio.ensure_future(q2_get(), loop=loop))
+        assert k == (r + 1) * 2
+
+    for r in range(10):
+        k = loop.run_until_complete(asyncio.ensure_future(q3_get(), loop=loop))
+        assert k == (r + 1) * 3
+
+    # shut down
+    mp.cancel()
+    loop.stop()
+    loop.run_forever()
+    loop.close()
+
+
 def test_wait_until_listeners():
     # make sure that we don't start feeding the queues until there IS one
 

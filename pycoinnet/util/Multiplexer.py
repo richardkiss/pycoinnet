@@ -1,7 +1,10 @@
 
 import asyncio
+import logging
 
 from weakref import WeakSet
+
+logger = logging.getLogger(__name__)
 
 
 class Multiplexer:
@@ -21,13 +24,17 @@ class Multiplexer:
                     yield from self.event_queue_nonempty.wait()
                 for q in self.queue_set:
                     try:
-                        q.put_nowait(item)
+                        if q.filter_f(item):
+                            q.put_nowait(item)
                     except asyncio.QueueFull:
                         pass
+                    except Exception:
+                        logger.exception("exception in filter_f")
         self.run_task = asyncio.Task(f(), loop=loop)
 
-    def new_q(self, maxsize=0):
+    def new_q(self, filter_f=lambda o: True, maxsize=0):
         q = asyncio.Queue(maxsize=maxsize, loop=self.loop)
+        q.filter_f = filter_f
         self.queue_set.add(q)
         self.event_queue_nonempty.set()
         return q.get
