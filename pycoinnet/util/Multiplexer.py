@@ -14,10 +14,11 @@ class Multiplexer:
         self.get_next_obj = get_next_obj
         self.queue_set = WeakSet()
         self.event_queue_nonempty = asyncio.Event(loop=loop)
+        self.is_running = True
 
         @asyncio.coroutine
         def f():
-            while True:
+            while self.is_running:
                 item = yield from self.get_next_obj()
                 if len(self.queue_set) == 0:
                     self.event_queue_nonempty.clear()
@@ -47,5 +48,4 @@ class Multiplexer:
         self.queue_set.discard(getattr(q, "__self__"))
 
     def cancel(self):
-        self.run_task.cancel()
-        self.queue_set.clear()
+        self.is_running = False

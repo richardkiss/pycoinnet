@@ -8,7 +8,7 @@ import weakref
 from pycoin import encoding
 
 from pycoinnet.message import parse_from_data, pack_from_data
-
+from pycoinnet.util.Multiplexer import Multiplexer
 
 class BitcoinProtocolError(Exception):
     pass
@@ -25,7 +25,7 @@ class BitcoinPeerProtocol(asyncio.Protocol):
         self.connection_made_future = asyncio.Future()
         self.connection_lost_future = asyncio.Future()
         self._run_handle = None
-        self.message_queues = weakref.WeakSet()
+        self.multiplexer = Multiplexer(self.parse_next_message)
         # stats
         self.bytes_read = 0
         self.bytes_writ = 0
@@ -33,39 +33,21 @@ class BitcoinPeerProtocol(asyncio.Protocol):
         self._tasks = set()
 
     def new_get_next_message_f(self, filter_f=lambda message_name, data: True, maxsize=0):
+        def filter_f1(args):
+            if args == (None, None):
+                return True
+            return filter_f(*args)
+
+        q = self.multiplexer.new_q(filter_f=filter_f1, maxsize=maxsize)
+
         @asyncio.coroutine
-        def run(self):
-            yield from asyncio.wait_for(self.connection_made_future, timeout=None)
-            while True:
-                try:
-                    message_name, data = yield from self._parse_next_message()
-                except EOFError:
-                    logging.debug("end of stream %s", self)
-                    message_name, data = None, None
-                except Exception:
-                    logging.exception("error in _parse_next_message")
-                    message_name, data = None, None
-                for q in self.message_queues:
-                    if q.filter_f(message_name, data):
-                        q.put_nowait((message_name, data))
-                if message_name is None:
-                    break
-
-        q = asyncio.Queue(maxsize=maxsize)
-        q.filter_f = filter_f
-        self.message_queues.add(q)
-
         def get_next_message():
-            msg_name, data = yield from q.get()
+            msg_name, data = yield from q()
             if msg_name is None:
+                self.multiplexer.remove_q(q)
                 raise EOFError
             return msg_name, data
 
-        if self._run_handle:
-            if self._run_handle.done():
-                q.put_nowait((None, None))
-        else:
-            self._run_handle = asyncio.Task(run(self))
         return get_next_message
 
     def add_task(self, task):
@@ -153,6 +135,17 @@ class BitcoinPeerProtocol(asyncio.Protocol):
         # parse the blob into a BitcoinProtocolMessage object
         data = parse_from_data(message_name, message_data)
         return message_name, data
+
+    @asyncio.coroutine
+    def parse_next_message(self):
+        try:
+            return (yield from self._parse_next_message())
+        except EOFError:
+            pass
+        except Exception:
+            logging.exception("problem in parse_next_message")
+        self.multiplexer.cancel()
+        return (None, None)
 
     def __lt__(self, other):
         return self.connect_start_time < other.connect_start_time
