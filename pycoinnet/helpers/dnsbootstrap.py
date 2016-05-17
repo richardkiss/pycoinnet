@@ -93,9 +93,6 @@ def new_queue_of_timestamp_peeraddress_tuples(
     return timestamp_peeraddress_tuple_queue
 
 
-    return timestamp_peeraddress_tuple_queue
-
-
 def main():
     @asyncio.coroutine
     def show(timestamp_address_queue):
