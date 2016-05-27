@@ -15,6 +15,13 @@ class BitcoinProtocolError(Exception):
 
 
 class BitcoinPeerProtocol(asyncio.Protocol):
+    """
+    self.connection_made_future:
+      a future yielding the transport over which the connection is made
+    self.connection_lost_future:
+      a future that is set once the connection is lost (or which contains
+      the exception that was hit)
+    """
 
     MAX_MESSAGE_SIZE = 2*1024*1024
 
