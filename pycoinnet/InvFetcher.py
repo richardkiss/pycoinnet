@@ -104,6 +104,8 @@ class InvFetcher:
             the_type = self.TYPE_DB[msg_name]
             inv_item = InvItem(the_type, the_hash)
             future = self._futures.get(inv_item)
+            if future is None:
+                return
             if msg_name == "merkleblock":
                 # we now expect a bunch of tx messages
                 tx_inv_items = [InvItem(ITEM_TYPE_TX, h)
@@ -122,7 +124,7 @@ class InvFetcher:
             for inv_item in msg_data["items"]:
                 the_hash = inv_item.data
                 future = self._futures.get(inv_item)
-                if future:
+                if future is not None:
                     # we don't need to delete the future since it should
                     # be garbage collected, but hey, why not
                     del self._futures[inv_item]
