@@ -60,7 +60,7 @@ class InteropTest(unittest.TestCase):
             lambda: PeerProtocol(MAINNET), host=self.host, port=self.port))
         inv_fetcher = InvFetcher(protocol)
         dispatcher = Dispatcher(protocol)
-        dispatcher.add_method(inv_fetcher.handle_msg)
+        dispatcher.add_msg_handler(inv_fetcher.handle_msg)
         version_data = run(dispatcher.handshake())
         print(version_data)
         asyncio.get_event_loop().create_task(dispatcher.dispatch_messages())
@@ -81,22 +81,10 @@ class InteropTest(unittest.TestCase):
         assert b is None
 
     def test_headers_catchup(self):
-        future = asyncio.Future()
-
-        def handle_msg(peer, name, data):
-            print(name)
-            if name != 'headers':
-                return
-            if future.done():
-                return
-            headers = [bh for bh, t in data["headers"]]
-            return future.set_result(headers)
-
         loop = asyncio.get_event_loop()
         transport, protocol = run(loop.create_connection(
             lambda: PeerProtocol(MAINNET), host=self.host, port=self.port))
         dispatcher = Dispatcher(protocol)
-        dispatcher.add_method(handle_msg)
         version_data = run(dispatcher.handshake())
         print(version_data)
         asyncio.get_event_loop().create_task(dispatcher.dispatch_messages())
@@ -104,36 +92,50 @@ class InteropTest(unittest.TestCase):
         block_locator_hashes = [hash_stop]
         protocol.send_msg(message_name="getheaders",
                           version=1, hashes=block_locator_hashes, hash_stop=hash_stop)
-        headers = run(future)
-        print(headers)
+        name, data = run(dispatcher.wait_for_response('headers'))
+        assert name == 'headers'
+        print(data)
 
 
 class Dispatcher:
     def __init__(self, peer):
-        self._methods = dict()
-        self._method_id = 0
+        self._handlers = dict()
+        self._handler_id = 0
         self._peer = peer
 
-    def add_method(self, method):
-        id = self._method_id
-        self._methods[id] = method
-        self._method_id += 1
-        return id
+    def add_msg_handler(self, msg_handler):
+        handler_id = self._handler_id
+        self._handlers[handler_id] = msg_handler
+        self._handler_id += 1
+        return handler_id
 
-    def remove_method(self, id):
-        if id in self._methods:
-            del self._methods
+    def remove_msg_handler(self, handler_id):
+        if handler_id in self._handlers:
+            del self._handlers[handler_id]
 
     def handle_msg(self, name, data):
         loop = asyncio.get_event_loop()
-        for m in self._methods.values():
+        for m in self._handlers.values():
             # each method gets its own copy of the data dict
             # to protect from it being changed
             data = dict(data)
             if asyncio.iscoroutinefunction(m):
-                loop.create_task(m(self._peer, name, data))
+                loop.create_task(m(name, data))
             else:
-                loop.call_soon(m, self._peer, name, data)
+                loop.call_soon(m, name, data)
+
+    @asyncio.coroutine
+    def wait_for_response(self, *response_types):
+        future = asyncio.Future()
+
+        def handle_msg(name, data):
+            if name not in response_types:
+                return
+            future.set_result((name, data))
+
+        handler_id = self.add_msg_handler(handle_msg)
+        future.add_done_callback(lambda f: self.remove_msg_handler(handler_id))
+        return (yield from future)
 
     @asyncio.coroutine
     def handshake(self):
