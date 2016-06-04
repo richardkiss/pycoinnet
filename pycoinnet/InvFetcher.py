@@ -87,7 +87,7 @@ class InvFetcher:
                    merkleblock=ITEM_TYPE_MERKLEBLOCK)
 
     @asyncio.coroutine
-    def handle_msg(self, msg_name, msg_data):
+    def handle_msg(self, peer, msg_name, msg_data):
         """
         This method must be invoked for each message that comes from the peer
         (or at least, those of type tx, block, merkleblock and notfound).

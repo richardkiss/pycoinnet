@@ -21,7 +21,7 @@ VERSION_MSG = dict(
     remote_address=PeerAddress(1, "127.0.0.2", 6111),
     local_address=PeerAddress(1, "127.0.0.1", 6111),
     nonce=3412075413544046060,
-    last_block_index=0
+    last_block_index=10000
 )
 
 
@@ -46,17 +46,12 @@ class InteropTest(unittest.TestCase):
         assert msg[0] == 'verack'
         protocol.send_msg("mempool")
         msg_name, msg_data = run(protocol.next_message())
-        assert msg_name == 'inv'
         if msg_name == 'inv':
             items = msg_data.get("items")
             protocol.send_msg("getdata", items=items)
             for _ in range(len(items)):
                 msg_name, msg_data = run(protocol.next_message())
                 print(msg_data.get("tx"))
-        input("hit return to disconnect >")
-        protocol._transport.close()
-        t = run(protocol._connection_lost_future)
-        print(t)
 
     def test_InvFetcher(self):
         BLOCK_95150_HASH = h2b_rev("00000000000026ace69f5cbe46f7bbe868737635edef3354ef09fdaad8c755fb")
@@ -64,9 +59,11 @@ class InteropTest(unittest.TestCase):
         transport, protocol = run(loop.create_connection(
             lambda: PeerProtocol(MAINNET), host=self.host, port=self.port))
         inv_fetcher = InvFetcher(protocol)
-        dispatcher = Dispatcher()
+        dispatcher = Dispatcher(protocol)
         dispatcher.add_method(inv_fetcher.handle_msg)
-        asyncio.get_event_loop().create_task(state_walker(protocol, dispatcher))
+        version_data = run(dispatcher.handshake())
+        print(version_data)
+        asyncio.get_event_loop().create_task(dispatcher.dispatch_messages())
         inv_item = InvItem(ITEM_TYPE_BLOCK, BLOCK_95150_HASH)
         bl = run(inv_fetcher.fetch(inv_item))
         assert len(bl.txs) == 5
@@ -83,44 +80,79 @@ class InteropTest(unittest.TestCase):
         b = run(inv_fetcher.fetch(inv_item))
         assert b is None
 
+    def test_headers_catchup(self):
+        future = asyncio.Future()
+
+        def handle_msg(peer, name, data):
+            print(name)
+            if name != 'headers':
+                return
+            if future.done():
+                return
+            headers = [bh for bh, t in data["headers"]]
+            return future.set_result(headers)
+
+        loop = asyncio.get_event_loop()
+        transport, protocol = run(loop.create_connection(
+            lambda: PeerProtocol(MAINNET), host=self.host, port=self.port))
+        dispatcher = Dispatcher(protocol)
+        dispatcher.add_method(handle_msg)
+        version_data = run(dispatcher.handshake())
+        print(version_data)
+        asyncio.get_event_loop().create_task(dispatcher.dispatch_messages())
+        hash_stop = b'\0' * 32
+        block_locator_hashes = [hash_stop]
+        protocol.send_msg(message_name="getheaders",
+                          version=1, hashes=block_locator_hashes, hash_stop=hash_stop)
+        headers = run(future)
+        print(headers)
+
 
 class Dispatcher:
-    def __init__(self):
-        self._methods = []
+    def __init__(self, peer):
+        self._methods = dict()
+        self._method_id = 0
+        self._peer = peer
 
     def add_method(self, method):
-        self._methods.append(method)
+        id = self._method_id
+        self._methods[id] = method
+        self._method_id += 1
+        return id
+
+    def remove_method(self, id):
+        if id in self._methods:
+            del self._methods
 
     def handle_msg(self, name, data):
         loop = asyncio.get_event_loop()
-        for m in self._methods:
+        for m in self._methods.values():
             # each method gets its own copy of the data dict
             # to protect from it being changed
             data = dict(data)
             if asyncio.iscoroutinefunction(m):
-                loop.create_task(m(name, data))
+                loop.create_task(m(self._peer, name, data))
             else:
-                loop.call_soon(m, name, data)
+                loop.call_soon(m, self._peer, name, data)
 
-
-@asyncio.coroutine
-def state_walker(peer, dispatcher):
-    try:
+    @asyncio.coroutine
+    def handshake(self):
         # "version"
-        peer.send_msg("version", **VERSION_MSG)
-        msg, version_data = yield from peer.next_message()
-        dispatcher.handle_msg(msg, version_data)
+        self._peer.send_msg("version", **VERSION_MSG)
+        msg, version_data = yield from self._peer.next_message()
+        self.handle_msg(msg, version_data)
         assert msg == 'version'
 
         # "verack"
-        peer.send_msg("verack")
-        msg, verack_data = yield from peer.next_message()
-        dispatcher.handle_msg(msg, verack_data)
+        self._peer.send_msg("verack")
+        msg, verack_data = yield from self._peer.next_message()
+        self.handle_msg(msg, verack_data)
         assert msg == 'verack'
+        return version_data
 
+    @asyncio.coroutine
+    def dispatch_messages(self):
         # loop
         while True:
-            msg, data = yield from peer.next_message()
-            dispatcher.handle_msg(msg, data)
-    except Exception:
-        raise
+            msg, data = yield from self._peer.next_message()
+            self.handle_msg(msg, data)
