@@ -5,6 +5,7 @@ import unittest
 
 from pycoin.serialize import h2b_rev
 
+from pycoinnet.Blockfetcher import Blockfetcher
 from pycoinnet.Dispatcher import Dispatcher
 from pycoinnet.InvFetcher import InvFetcher
 from pycoinnet.PeerProtocol import PeerProtocol
@@ -97,7 +98,7 @@ class InteropTest(unittest.TestCase):
         assert name == 'headers'
         print(data)
 
-    def test_getblocks_multi(self):
+    def test_Blockfetcher(self):
         loop = asyncio.get_event_loop()
         transport, protocol = run(loop.create_connection(
             lambda: PeerProtocol(MAINNET), host=self.host, port=self.port))
@@ -106,33 +107,18 @@ class InteropTest(unittest.TestCase):
         asyncio.get_event_loop().create_task(dispatcher.dispatch_messages())
         # create a list of block headers we're interested in
         # use that to seed a list of blocks
-        block_header_list = []
-
-
-class BlockFetcher:
-    def __init__(self):
-        self._fetch_q = asyncio.PriorityQueue()
-        self._peers = set()
-        self._peer_tasks = dict()
-
-    def add_peer(self, peer, dispatcher):
-        # keep stats on peers
-        # bytes/s (in the last time period)
-        if peer not in self._peer_tasks:
-            self._peers.add((peer, dispatcher))
-            task = asyncio.create_task(self._peer_task(peer, dispatcher))
-            self._peer_tasks[peer] = task
-
-    @asyncio.coroutine
-    def _peer_task(self, peer, dispatcher):
-        pass
-
-    def fetch_blocks(self, block_headers):
-        # returns a bunch of futures
-        # run a loop
-        # keep a list of peer batch sizes
-        # do a fetch of batch_size
-        # wait for
-        for bh in block_headers:
-            f = asyncio.Future()
-            self._fetch_q.put_nowait((bh, f))
+        hash_stop = b'\0' * 32
+        block_locator_hashes = [hash_stop]
+        protocol.send_msg(message_name="getheaders",
+                          version=1, hashes=block_locator_hashes, hash_stop=hash_stop)
+        name, data = run(dispatcher.wait_for_response('headers'))
+        assert name == 'headers'
+        block_hashes = [bh.hash() for bh, v in data["headers"]]
+        blockfetcher = Blockfetcher()
+        inv_fetcher = InvFetcher(protocol)
+        dispatcher.add_msg_handler(inv_fetcher.handle_msg)
+        blockfetcher.add_fetcher(inv_fetcher)
+        futures = [blockfetcher.get_block_future(bh, idx) for idx, bh in enumerate(block_hashes[:5000])]
+        for f in futures:
+            b = run(f)
+            print(b)

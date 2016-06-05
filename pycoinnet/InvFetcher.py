@@ -51,7 +51,7 @@ class InvFetcher:
         if self._is_closed:
             future.set_exception(EOFError())
         try:
-            return (yield from asyncio.wait_for(future, timeout=timeout))
+            return asyncio.wait_for(future, timeout=timeout)
         except asyncio.TimeoutError:
             return None
 
@@ -60,7 +60,7 @@ class InvFetcher:
         Return the number of items that have been requested to the remote
         that have not yet been answered.
         """
-        return len(f for f in self._futures if not f.done())
+        return sum(1 for f in self._futures.values() if not f.done())
 
     def pending_request_count(self):
         """
@@ -127,7 +127,8 @@ class InvFetcher:
                 # garbage collected, as they're kept in a WeakValueDictionary
                 # so they're jammed into the item (which is a merkleblock).
                 # Once the item is gone, we don't care about the futures anyway.
-            future.set_result(item)
+            if not future.done():
+                future.set_result(item)
         if msg_name == "notfound":
             for inv_item in msg_data["items"]:
                 the_hash = inv_item.data
