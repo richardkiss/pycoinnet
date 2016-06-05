@@ -5,6 +5,7 @@ import unittest
 
 from pycoin.serialize import h2b_rev
 
+from pycoinnet.Dispatcher import Dispatcher
 from pycoinnet.InvFetcher import InvFetcher
 from pycoinnet.PeerProtocol import PeerProtocol
 from pycoinnet.msg.InvItem import InvItem, ITEM_TYPE_BLOCK, ITEM_TYPE_MERKLEBLOCK, ITEM_TYPE_TX
@@ -61,7 +62,7 @@ class InteropTest(unittest.TestCase):
         inv_fetcher = InvFetcher(protocol)
         dispatcher = Dispatcher(protocol)
         dispatcher.add_msg_handler(inv_fetcher.handle_msg)
-        version_data = run(dispatcher.handshake())
+        version_data = run(dispatcher.handshake(**VERSION_MSG))
         print(version_data)
         asyncio.get_event_loop().create_task(dispatcher.dispatch_messages())
         inv_item = InvItem(ITEM_TYPE_BLOCK, BLOCK_95150_HASH)
@@ -85,7 +86,7 @@ class InteropTest(unittest.TestCase):
         transport, protocol = run(loop.create_connection(
             lambda: PeerProtocol(MAINNET), host=self.host, port=self.port))
         dispatcher = Dispatcher(protocol)
-        version_data = run(dispatcher.handshake())
+        version_data = run(dispatcher.handshake(**VERSION_MSG))
         print(version_data)
         asyncio.get_event_loop().create_task(dispatcher.dispatch_messages())
         hash_stop = b'\0' * 32
@@ -96,65 +97,42 @@ class InteropTest(unittest.TestCase):
         assert name == 'headers'
         print(data)
 
-
-class Dispatcher:
-    def __init__(self, peer):
-        self._handlers = dict()
-        self._handler_id = 0
-        self._peer = peer
-
-    def add_msg_handler(self, msg_handler):
-        handler_id = self._handler_id
-        self._handlers[handler_id] = msg_handler
-        self._handler_id += 1
-        return handler_id
-
-    def remove_msg_handler(self, handler_id):
-        if handler_id in self._handlers:
-            del self._handlers[handler_id]
-
-    def handle_msg(self, name, data):
+    def test_getblocks_multi(self):
         loop = asyncio.get_event_loop()
-        for m in self._handlers.values():
-            # each method gets its own copy of the data dict
-            # to protect from it being changed
-            data = dict(data)
-            if asyncio.iscoroutinefunction(m):
-                loop.create_task(m(name, data))
-            else:
-                loop.call_soon(m, name, data)
+        transport, protocol = run(loop.create_connection(
+            lambda: PeerProtocol(MAINNET), host=self.host, port=self.port))
+        dispatcher = Dispatcher(protocol)
+        run(dispatcher.handshake(**VERSION_MSG))
+        asyncio.get_event_loop().create_task(dispatcher.dispatch_messages())
+        # create a list of block headers we're interested in
+        # use that to seed a list of blocks
+        block_header_list = []
+
+
+class BlockFetcher:
+    def __init__(self):
+        self._fetch_q = asyncio.PriorityQueue()
+        self._peers = set()
+        self._peer_tasks = dict()
+
+    def add_peer(self, peer, dispatcher):
+        # keep stats on peers
+        # bytes/s (in the last time period)
+        if peer not in self._peer_tasks:
+            self._peers.add((peer, dispatcher))
+            task = asyncio.create_task(self._peer_task(peer, dispatcher))
+            self._peer_tasks[peer] = task
 
     @asyncio.coroutine
-    def wait_for_response(self, *response_types):
-        future = asyncio.Future()
+    def _peer_task(self, peer, dispatcher):
+        pass
 
-        def handle_msg(name, data):
-            if name not in response_types:
-                return
-            future.set_result((name, data))
-
-        handler_id = self.add_msg_handler(handle_msg)
-        future.add_done_callback(lambda f: self.remove_msg_handler(handler_id))
-        return (yield from future)
-
-    @asyncio.coroutine
-    def handshake(self):
-        # "version"
-        self._peer.send_msg("version", **VERSION_MSG)
-        msg, version_data = yield from self._peer.next_message()
-        self.handle_msg(msg, version_data)
-        assert msg == 'version'
-
-        # "verack"
-        self._peer.send_msg("verack")
-        msg, verack_data = yield from self._peer.next_message()
-        self.handle_msg(msg, verack_data)
-        assert msg == 'verack'
-        return version_data
-
-    @asyncio.coroutine
-    def dispatch_messages(self):
-        # loop
-        while True:
-            msg, data = yield from self._peer.next_message()
-            self.handle_msg(msg, data)
+    def fetch_blocks(self, block_headers):
+        # returns a bunch of futures
+        # run a loop
+        # keep a list of peer batch sizes
+        # do a fetch of batch_size
+        # wait for
+        for bh in block_headers:
+            f = asyncio.Future()
+            self._fetch_q.put_nowait((bh, f))

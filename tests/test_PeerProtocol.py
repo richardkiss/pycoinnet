@@ -88,6 +88,29 @@ class PeerProtocolTest(unittest.TestCase):
     'alert': "payload:S signature:S",
     """
 
+    def test_disconnect(self):
+        pp1, pp2 = connect_pair()
+        for nonce in (1, 11, 111123, 8888888817129829):
+            for t in "ping pong".split():
+                d = dict(nonce=nonce)
+                t1 = pp1.send_msg(t, **d)
+                assert t1 is None
+                t1 = pp2.send_msg(t, **d)
+                assert t1 is None
+                t2 = run(pp2.next_message())
+                assert t2 == (t, d)
+                t2 = run(pp1.next_message())
+                assert t2 == (t, d)
+        pp2.send_msg("ping", nonce=100)
+        t1 = run(pp1.next_message())
+        assert t1 == ("ping", dict(nonce=100))
+        pp2.send_msg("ping", nonce=100)
+        pp2._transport.close()
+        run(pp1.next_message())
+        with self.assertRaises(EOFError):
+            run(pp1.next_message())
+
+
     def ztest_raw_data(self):
         DATA = []
 

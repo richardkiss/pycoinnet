@@ -3,8 +3,9 @@ import hashlib
 from pycoin import ecdsa
 from pycoin.block import Block, BlockHeader
 from pycoin.encoding import public_pair_to_sec
+from pycoin.key.Key import Key
 from pycoin.tx.Tx import Tx, TxIn, TxOut
-
+from pycoin.tx.TxOut import standard_tx_out_script
 
 GENESIS_TIME = 1390000000
 DEFAULT_DIFFICULTY = 3000000
@@ -16,8 +17,10 @@ def make_hash(i, s=b''):
 
 
 def make_tx(i):
+    key = Key(12345 * (i+29))
+    script = standard_tx_out_script(key.address())
     txs_in = [TxIn(make_hash(i*10000+idx), (i+idx) % 2) for idx in range(3)]
-    txs_out = [TxOut(i*40000, make_hash(i*20000+idx)) for idx in range(2)]
+    txs_out = [TxOut(i*40000, script) for idx in range(2)]
     tx = Tx(1, txs_in, txs_out)
     return tx
 
