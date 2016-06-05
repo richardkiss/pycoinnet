@@ -23,6 +23,7 @@ class InvFetcher:
         self._futures = weakref.WeakValueDictionary()
         self._batch_size = batch_size
         self._send_getdata_lock = asyncio.Lock()
+        self._is_closed = False
 
     def _future_for_inv_item(self, inv_item):
         """
@@ -47,6 +48,8 @@ class InvFetcher:
             if self._request_q.qsize() == 0:
                 asyncio.get_event_loop().create_task(self._send_getdata())
             self._request_q.put_nowait(inv_item)
+        if self._is_closed:
+            future.set_exception(EOFError())
         try:
             return (yield from asyncio.wait_for(future, timeout=timeout))
         except asyncio.TimeoutError:
@@ -98,6 +101,11 @@ class InvFetcher:
         The "merkleblock" item is augmented with .tx_futures that can be
         waited on.
         """
+        if msg_name is None:
+            self._is_closed = True
+            for f in self._futures:
+                if not f.done():
+                    f.set_exception(EOFError())
         if msg_name in self.ITEM_LOOKUP:
             item = msg_data[self.ITEM_LOOKUP[msg_name]]
             the_hash = item.hash()
