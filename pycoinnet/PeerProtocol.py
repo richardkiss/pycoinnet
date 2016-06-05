@@ -31,13 +31,13 @@ class PeerProtocol(asyncio.Protocol):
         self._peername = ("(unconnected)", 0)
         self._connection_made_future = asyncio.Future()
         self._connection_lost_future = asyncio.Future()
+        self._msg_lock = asyncio.Lock()
+        self._is_writable = False
         # stats
         self._max_msg_size = max_msg_size
         self._bytes_read = 0
         self._bytes_writ = 0
         self._connect_start_time = None
-        self._msg_lock = asyncio.Lock()
-        self._is_writable = False
 
     def send_msg(self, message_name, **kwargs):
         message_data = self._pack_from_data(message_name, **kwargs)
@@ -56,11 +56,13 @@ class PeerProtocol(asyncio.Protocol):
         self._connection_made_future.set_result(transport)
         self._transport = transport
         self._reader = asyncio.StreamReader()
+        self._reader.set_transport(transport)
         self._is_writable = True
         self._peername = str(transport)
         self._connect_start_time = time.time()
 
     def connection_lost(self, exc):
+        self._reader.feed_eof()
         if exc:
             self._connection_lost_future.set_exception(exc)
         else:
