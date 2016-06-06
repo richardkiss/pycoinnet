@@ -1,5 +1,6 @@
 
 import asyncio
+import logging
 import os
 import unittest
 
@@ -25,6 +26,20 @@ VERSION_MSG = dict(
     nonce=3412075413544046060,
     last_block_index=10000
 )
+
+LOG_FORMAT = ('%(asctime)s [%(process)d] [%(levelname)s] '
+              '%(filename)s:%(lineno)d %(message)s')
+
+asyncio.tasks._DEBUG = True
+logging.basicConfig(level=logging.DEBUG, format=LOG_FORMAT)
+logging.getLogger("asyncio").setLevel(logging.INFO)
+
+
+def log_file(logPath, level=logging.NOTSET):
+    new_log = logging.FileHandler(logPath)
+    new_log.setLevel(level)
+    new_log.setFormatter(logging.Formatter(LOG_FORMAT))
+    logging.getLogger().addHandler(new_log)
 
 
 class InteropTest(unittest.TestCase):
@@ -98,13 +113,20 @@ class InteropTest(unittest.TestCase):
         assert name == 'headers'
         print(data)
 
-    def test_Blockfetcher(self):
+    def test_Blockfetcher_pair(self):
         loop = asyncio.get_event_loop()
+        blockfetcher = Blockfetcher()
+
+        # create a connection
         transport, protocol = run(loop.create_connection(
             lambda: PeerProtocol(MAINNET), host=self.host, port=self.port))
         dispatcher = Dispatcher(protocol)
         run(dispatcher.handshake(**VERSION_MSG))
-        asyncio.get_event_loop().create_task(dispatcher.dispatch_messages())
+        loop.create_task(dispatcher.dispatch_messages())
+        if 1:
+            dispatcher.add_msg_handler(blockfetcher.handle_msg)
+            blockfetcher.add_peer(protocol)
+
         # create a list of block headers we're interested in
         # use that to seed a list of blocks
         hash_stop = b'\0' * 32
@@ -114,11 +136,18 @@ class InteropTest(unittest.TestCase):
         name, data = run(dispatcher.wait_for_response('headers'))
         assert name == 'headers'
         block_hashes = [bh.hash() for bh, v in data["headers"]]
-        blockfetcher = Blockfetcher()
-        inv_fetcher = InvFetcher(protocol)
-        dispatcher.add_msg_handler(inv_fetcher.handle_msg)
-        blockfetcher.add_fetcher(inv_fetcher)
-        futures = [blockfetcher.get_block_future(bh, idx) for idx, bh in enumerate(block_hashes[:5000])]
+            
+        # create another connection
+        if 1:
+            transport, protocol = run(loop.create_connection(
+                lambda: PeerProtocol(MAINNET), host="127.0.0.1", port=self.port))
+            dispatcher = Dispatcher(protocol)
+            run(dispatcher.handshake(**VERSION_MSG))
+            loop.create_task(dispatcher.dispatch_messages())
+            dispatcher.add_msg_handler(blockfetcher.handle_msg)
+            blockfetcher.add_peer(protocol)
+
+        futures = blockfetcher.fetch_blocks((bh, idx) for idx, bh in enumerate(block_hashes[:5000]))
         for f in futures:
             b = run(f)
             print(b)
