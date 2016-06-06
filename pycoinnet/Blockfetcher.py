@@ -24,8 +24,13 @@ class Blockfetcher:
         # this queue accepts tuples of the form:
         #  (priority, InvItem(ITEM_TYPE_BLOCK, block_hash), future, peers_tried)
         self._block_hash_priority_queue = asyncio.PriorityQueue()
+        self._retry_priority_queue = asyncio.PriorityQueue()
         self._get_batch_lock = asyncio.Lock()
         self._futures = weakref.WeakValueDictionary()
+        self._max_batch_size = 500
+        self._initial_batch_size = 10
+        self._target_batch_time = 3
+        self._max_batch_timeout = 6
 
     def fetch_blocks(self, block_hash_priority_pair_list):
         """
@@ -68,6 +73,21 @@ class Blockfetcher:
     def _get_batch(self, batch_size, peer):
         logging.info("getting batch up to size %d for %s", batch_size, peer)
         with (yield from self._get_batch_lock):
+            now = asyncio.get_event_loop().time()
+            retry_time = now + self._max_batch_timeout
+
+            # deal with retry queue
+            while not self._retry_priority_queue.empty():
+                retry_time, item = self._retry_priority_queue.get_nowait()
+                if retry_time > now:
+                    self._retry_priority_queue.put_nowait((retry_time, item))
+                    break
+                (pri, block_hash, block_future, peers_tried) = item
+                if not block_future.done():
+                    logging.info("timeout, retrying block %s", item[0])
+                    self._block_hash_priority_queue.put_nowait(item)
+
+            # build a batch
             skipped = []
             inv_items = []
             futures = []
@@ -79,50 +99,37 @@ class Blockfetcher:
                 if block_future.done():
                     continue
                 if peer in peers_tried:
+                    logging.debug("block %s already tried by peer %s, skipping", item[0], peer)
                     skipped.append(item)
                     continue
                 peers_tried.add(peer)
                 inv_items.append(InvItem(ITEM_TYPE_BLOCK, block_hash))
                 futures.append(block_future)
+                self._retry_priority_queue.put_nowait((retry_time, item))
             for item in skipped:
                 self._block_hash_priority_queue.put_nowait(item)
         start_batch_time = asyncio.get_event_loop().time()
-        try:
-            peer.send_msg("getdata", items=inv_items)
-        except Exception:
-            logging.exception("problem sending getdata msg to %s", peer)
-            for f in futures:
-                self._block_hash_priority_queue.put_nowait(f.item)
+        peer.send_msg("getdata", items=inv_items)
         logging.info("returning batch of size %d for %s", len(futures), peer)
         logging.debug("requesting %s from %s", [f.item[0] for f in futures], peer)
         return futures, start_batch_time
 
     @asyncio.coroutine
-    def _fetcher_loop(self, peer, target_batch_time=3, max_batch_time=6):
-        MAX_BATCH_SIZE = 500
-        initial_batch_size = 10
-        batch_size = initial_batch_size
+    def _fetcher_loop(self, peer):
+        batch_size = self._initial_batch_size
         loop = asyncio.get_event_loop()
         batch_1, start_batch_time_1 = yield from self._get_batch(batch_size=batch_size, peer=peer)
         try:
             while True:
                 batch_2, start_batch_time_2 = yield from self._get_batch(batch_size=batch_size, peer=peer)
-                yield from asyncio.wait(batch_1, timeout=max_batch_time)
+                yield from asyncio.wait(batch_1, timeout=self._max_batch_timeout)
                 # look for futures that need to be retried
-                item_count = 0
-                for f in batch_1:
-                    if not f.done():
-                        self._block_hash_priority_queue.put_nowait(f.item)
-                        logging.error("timeout waiting for block %d, requing", f.item[0])
-                    else:
-                        item_count += 1
+                item_count = sum(1 for f in batch_1 if f.done())
                 # calculate new batch size
                 batch_time = loop.time() - start_batch_time_1
                 logging.info("got batch size %d in time %s", item_count, batch_time)
-                if item_count == 0:
-                    item_count = 1
-                time_per_item = batch_time / item_count
-                batch_size = min(int(target_batch_time / time_per_item) + 1, MAX_BATCH_SIZE)
+                time_per_item = batch_time / max(1, item_count)
+                batch_size = min(int(self._target_batch_time / time_per_item) + 1, self._max_batch_size)
                 batch_1 = batch_2
                 logging.info("new batch size is %d", batch_size)
                 start_batch_time_1 = start_batch_time_2
