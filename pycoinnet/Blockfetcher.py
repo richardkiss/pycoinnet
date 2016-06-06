@@ -20,7 +20,7 @@ class Blockfetcher:
 
     It fetches new blocks via get_block_future or get_block.
     """
-    def __init__(self, max_batch_size=200, initial_batch_size=1, target_batch_time=3, max_batch_timeout=12):
+    def __init__(self, max_batch_size=300, initial_batch_size=1, target_batch_time=2, max_batch_timeout=7):
         # this queue accepts tuples of the form:
         #  (priority, InvItem(ITEM_TYPE_BLOCK, block_hash), future, peers_tried)
         self._block_hash_priority_queue = asyncio.PriorityQueue()
@@ -75,21 +75,32 @@ class Blockfetcher:
         with (yield from self._get_batch_lock):
             logging.info("getting batch up to size %d for %s", batch_size, peer)
             now = asyncio.get_event_loop().time()
-            retry_time = now + self._max_batch_timeout
 
             # deal with retry queue
             while not self._retry_priority_queue.empty():
-                retry_time, item = self._retry_priority_queue.get_nowait()
+                retry_time, items = self._retry_priority_queue.get_nowait()
                 if retry_time > now:
-                    self._retry_priority_queue.put_nowait((retry_time, item))
+                    self._retry_priority_queue.put_nowait((retry_time, items))
                     break
-                (pri, block_hash, block_future, peers_tried) = item
-                if not block_future.done():
-                    logging.info("timeout, retrying block %s", item[0])
+                first_pri = None
+                last_pri = None
+                for item in items:
+                    (pri, block_hash, block_future, peers_tried) = item
+                    if block_future.done():
+                        continue
+                    if first_pri is None:
+                        first_pri = pri
+                    last_pri = pri
                     self._block_hash_priority_queue.put_nowait(item)
+                if first_pri is not None:
+                    if first_pri == last_pri:
+                        logging.info("timeout, retrying block %s", first_pri)
+                    else:
+                        logging.info("timeout, retrying blocks %s - %s", first_pri, last_pri)
 
             # build a batch
             skipped = []
+            items = []
             inv_items = []
             futures = []
             while len(futures) < batch_size:
@@ -106,7 +117,8 @@ class Blockfetcher:
                 peers_tried.add(peer)
                 inv_items.append(InvItem(ITEM_TYPE_BLOCK, block_hash))
                 futures.append(block_future)
-                self._retry_priority_queue.put_nowait((retry_time, item))
+                items.append(item)
+            self._retry_priority_queue.put_nowait((now + self._max_batch_timeout, items))
             for item in skipped:
                 self._block_hash_priority_queue.put_nowait(item)
             logging.info("returning batch of size %d for %s", len(futures), peer)

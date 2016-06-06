@@ -40,6 +40,8 @@ class PeerProtocol(asyncio.Protocol):
         self._connect_start_time = None
 
     def send_msg(self, message_name, **kwargs):
+        if self._connection_lost_future.done():
+            raise Exception("can't write")
         message_data = self._pack_from_data(message_name, **kwargs)
         message_type = message_name.encode("utf8")
         message_type_padded = (message_type+(b'\0'*12))[:12]
