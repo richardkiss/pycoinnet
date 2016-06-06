@@ -119,16 +119,17 @@ class Blockfetcher:
     def _fetcher_loop(self, peer):
         batch_size = self._initial_batch_size
         loop = asyncio.get_event_loop()
-        batch_1, start_batch_time_1 = yield from self._get_batch(batch_size=batch_size, peer=peer)
         try:
+            batch_1, start_batch_time_1 = yield from self._get_batch(batch_size=batch_size, peer=peer)
             while True:
                 batch_2, start_batch_time_2 = yield from self._get_batch(batch_size=batch_size, peer=peer)
                 yield from asyncio.wait(batch_1, timeout=self._max_batch_timeout)
-                # look for futures that need to be retried
+                # see how many items we got
                 item_count = sum(1 for f in batch_1 if f.done())
                 # calculate new batch size
                 batch_time = loop.time() - start_batch_time_1
-                logging.info("got batch size %d in time %s", item_count, batch_time)
+                logging.info("got %d items from batch size %d in %s s",
+                             item_count, len(batch_1), batch_time)
                 time_per_item = batch_time / max(1, item_count)
                 batch_size = min(int(self._target_batch_time / time_per_item) + 1, self._max_batch_size)
                 batch_1 = batch_2
