@@ -20,17 +20,17 @@ class Blockfetcher:
 
     It fetches new blocks via get_block_future or get_block.
     """
-    def __init__(self):
+    def __init__(self, max_batch_size=200, initial_batch_size=1, target_batch_time=3, max_batch_timeout=12):
         # this queue accepts tuples of the form:
         #  (priority, InvItem(ITEM_TYPE_BLOCK, block_hash), future, peers_tried)
         self._block_hash_priority_queue = asyncio.PriorityQueue()
         self._retry_priority_queue = asyncio.PriorityQueue()
         self._get_batch_lock = asyncio.Lock()
         self._futures = weakref.WeakValueDictionary()
-        self._max_batch_size = 500
-        self._initial_batch_size = 10
-        self._target_batch_time = 3
-        self._max_batch_timeout = 6
+        self._max_batch_size = max_batch_size
+        self._initial_batch_size = initial_batch_size
+        self._target_batch_time = target_batch_time
+        self._max_batch_timeout = max_batch_timeout
 
     def fetch_blocks(self, block_hash_priority_pair_list):
         """
@@ -68,11 +68,12 @@ class Blockfetcher:
             f = self._futures.get(bh)
             if f and not f.done():
                 f.set_result(block)
+                del self._futures[bh]
 
     @asyncio.coroutine
     def _get_batch(self, batch_size, peer):
-        logging.info("getting batch up to size %d for %s", batch_size, peer)
         with (yield from self._get_batch_lock):
+            logging.info("getting batch up to size %d for %s", batch_size, peer)
             now = asyncio.get_event_loop().time()
             retry_time = now + self._max_batch_timeout
 
@@ -108,10 +109,10 @@ class Blockfetcher:
                 self._retry_priority_queue.put_nowait((retry_time, item))
             for item in skipped:
                 self._block_hash_priority_queue.put_nowait(item)
+            logging.info("returning batch of size %d for %s", len(futures), peer)
         start_batch_time = asyncio.get_event_loop().time()
         peer.send_msg("getdata", items=inv_items)
-        logging.info("returning batch of size %d for %s", len(futures), peer)
-        logging.debug("requesting %s from %s", [f.item[0] for f in futures], peer)
+        logging.debug("requested %s from %s", [f.item[0] for f in futures], peer)
         return futures, start_batch_time
 
     @asyncio.coroutine
