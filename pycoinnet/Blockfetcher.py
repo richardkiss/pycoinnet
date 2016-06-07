@@ -71,7 +71,11 @@ class Blockfetcher:
 
     @asyncio.coroutine
     def _check_retry_q(self):
-        # deal with retry queue
+        """
+        Deal with retry queue.
+        Returns amount of time until first element in retry queue
+        becomes valid, or None if there aren't any.
+        """
         now = asyncio.get_event_loop().time()
         while not self._retry_priority_queue.empty():
             retry_time, items = self._retry_priority_queue.get_nowait()
@@ -97,6 +101,11 @@ class Blockfetcher:
 
     @asyncio.coroutine
     def _get_batch(self, batch_size, peer):
+        """
+        Returns a batch of size "batch_size" of blocks to fetch that
+        the given peer has not yet tried. Puts the batch into the retry queue,
+        marked as tried with this peer.
+        """
         with (yield from self._get_batch_lock):
             logging.info("getting batch up to size %d for %s", batch_size, peer)
             wait_timeout = yield from self._check_retry_q()
@@ -113,13 +122,13 @@ class Blockfetcher:
                     item = yield from asyncio.wait_for(
                         self._block_hash_priority_queue.get(), timeout=wait_timeout)
                 except asyncio.TimeoutError:
+                    logging.info("timeout, retry queue firing")
                     wait_timeout = yield from self._check_retry_q()
                     continue
                 (pri, block_hash, block_future, peers_tried) = item
                 if block_future.done():
                     continue
                 if peer in peers_tried:
-                    logging.debug("block %s already tried by peer %s, skipping", item[0], peer)
                     skipped.append(item)
                     continue
                 peers_tried.add(peer)
@@ -130,6 +139,9 @@ class Blockfetcher:
             self._retry_priority_queue.put_nowait((now + self._max_batch_timeout, items))
             for item in skipped:
                 self._block_hash_priority_queue.put_nowait(item)
+            if skipped:
+                logging.info("some blocks in range %s-%s already tried by peer %s, skipping",
+                             skipped[0][0], skipped[-1][0], peer)
             logging.info("returning batch of size %d for %s", len(futures), peer)
         start_batch_time = asyncio.get_event_loop().time()
         peer.send_msg("getdata", items=inv_items)
@@ -138,6 +150,12 @@ class Blockfetcher:
 
     @asyncio.coroutine
     def _fetcher_loop(self, peer):
+        """
+        This is invoked as a task, for each peer. It grabs two batches,
+        and starts downloading both of them. When the first batch finishes,
+        it grabs another, so two overlapping batches are always being
+        downloaded simultaneously.
+        """
         batch_size = self._initial_batch_size
         loop = asyncio.get_event_loop()
         try:
