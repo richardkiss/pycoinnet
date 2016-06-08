@@ -9,6 +9,8 @@ import asyncio
 import logging
 import os.path
 
+from pycoin.serialize import b2h_rev
+
 from pycoinnet.msg.InvItem import InvItem, ITEM_TYPE_BLOCK
 from pycoinnet.msg.PeerAddress import PeerAddress
 from pycoinnet.networks import MAINNET
@@ -108,6 +110,8 @@ def update_current_view(network, host, port, bcv, path):
             extra_block = yield from _fetch_missing(peer, dispatcher, headers[0])
             headers = [extra_block] + headers
 
+        if len(headers) == 0:
+            return
         block_number = bcv.do_headers_improve_path(headers)
         if block_number is not False:
             logging.debug("block header count is now %d", block_number)
@@ -122,11 +126,9 @@ def update_chain_state(network, path, count=3):
         for item in (yield from f):
             host, port = item[-1]
             yield from update_current_view(network, host, port, bcv, path)
-            last_index, last_block, total_work = bcv.last_block_tuple()
-            print("last block index %d, hash %s" % (last_index, last_block.id()))
             count -= 1
             if count <= 0:
-                return
+                return bcv
 
 
 def main():
@@ -137,7 +139,9 @@ def main():
     path = os.path.join(args.path or storage_base_path(), "chainstate.json")
 
     loop = asyncio.get_event_loop()
-    loop.run_until_complete(update_chain_state(MAINNET, path))
+    bcv = loop.run_until_complete(update_chain_state(MAINNET, path))
+    last_index, last_block_hash, total_work = bcv.last_block_tuple()
+    print("last block index %d, hash %s" % (last_index, b2h_rev(last_block_hash)))
 
 
 if __name__ == '__main__':
