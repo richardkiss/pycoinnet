@@ -11,6 +11,7 @@ import os.path
 
 from pycoin.serialize import b2h_rev
 
+from pycoinnet.dnsbootstrap import dns_bootstrap_host_port_lists
 from pycoinnet.msg.InvItem import InvItem, ITEM_TYPE_BLOCK
 from pycoinnet.msg.PeerAddress import PeerAddress
 from pycoinnet.networks import MAINNET
@@ -26,16 +27,6 @@ LOG_FORMAT = ('%(asctime)s [%(process)d] [%(levelname)s] '
 asyncio.tasks._DEBUG = True
 logging.basicConfig(level=logging.DEBUG, format=LOG_FORMAT)
 logging.getLogger("asyncio").setLevel(logging.INFO)
-
-
-def dns_bootstrap_host_port_lists(network, getaddrinfo=asyncio.get_event_loop().getaddrinfo):
-    """
-    Accepts network type and returns an iterator of futures, each of which
-    produces a list.
-    """
-    dns_bootstrap = network.dns_bootstrap
-    futures = [getaddrinfo(h, network.default_port) for h in dns_bootstrap]
-    return asyncio.as_completed(futures)
 
 
 def storage_base_path():
@@ -123,12 +114,14 @@ def update_current_view(network, host, port, bcv, path):
 @asyncio.coroutine
 def create_update_futures(network, path, bcv, count):
     futures = []
-    for f in dns_bootstrap_host_port_lists(network):
-        for item in (yield from f):
-            host, port = item[-1]
-            futures.append(update_current_view(network, host, port, bcv, path))
-            if len(futures) >= count:
-                return futures
+    for f in dns_bootstrap_host_port_lists(network, count=count):
+        peer_addr = yield from f
+        if peer_addr is None:
+            return futures
+        host, port = peer_addr
+        futures.append(update_current_view(network, host, port, bcv, path))
+        if len(futures) >= count:
+            return futures
 
 
 @asyncio.coroutine
@@ -137,6 +130,7 @@ def update_chain_state(network, path, count=3):
     futures = yield from create_update_futures(network, path, bcv, count)
     yield from asyncio.wait(futures)
     return bcv
+
 
 def main():
     parser = argparse.ArgumentParser(description="Update chain state and print summary.")
