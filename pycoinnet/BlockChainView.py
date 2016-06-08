@@ -8,6 +8,10 @@ GENESIS_TUPLE = (-1, HASH_INITIAL_BLOCK, 0)
 
 
 class BlockChainView:
+    """
+    A headers-view of the block chain. Keeps track of index, hash, work, with
+    indices.
+    """
     def __init__(self, node_tuples=[]):
         """
         A node_tuple is (index, hash, total_work).
@@ -24,8 +28,12 @@ class BlockChainView:
         self.node_tuples = sorted(set(self.node_tuples).union(nt))
         self.hash_to_index.update(dict((h, idx) for idx, h, tw in nt))
 
-    def as_json(self):
-        return json.dumps([[t[0], b2h_rev(t[1]), t[2]] for t in self.node_tuples])
+    def as_json(self, **kwargs):
+        """
+        Return as text, ready for storage. Not maximally efficient, but simple,
+        and perfectly reasonable if only storing the winnowed view.
+        """
+        return json.dumps([[t[0], b2h_rev(t[1]), t[2]] for t in self.node_tuples], **kwargs)
 
     @classmethod
     def from_json(class_, the_json):
