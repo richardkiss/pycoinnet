@@ -99,7 +99,7 @@ def update_current_view(network, host, port, bcv, path):
     logging.info("connecting to %s:%d", host, port)
     dispatcher = Dispatcher(peer)
     yield from dispatcher.handshake(**VERSION_MSG)
-    asyncio.get_event_loop().create_task(dispatcher.dispatch_messages())
+    dispatcher.start()
 
     while True:
         block_locator_hashes = bcv.block_locator_hashes()
@@ -111,6 +111,7 @@ def update_current_view(network, host, port, bcv, path):
             headers = [extra_block] + headers
 
         if len(headers) == 0:
+            dispatcher.stop()
             return
         block_number = bcv.do_headers_improve_path(headers)
         if block_number is not False:
@@ -120,16 +121,22 @@ def update_current_view(network, host, port, bcv, path):
 
 
 @asyncio.coroutine
-def update_chain_state(network, path, count=3):
-    bcv = get_current_view(path)
+def create_update_futures(network, path, bcv, count):
+    futures = []
     for f in dns_bootstrap_host_port_lists(network):
         for item in (yield from f):
             host, port = item[-1]
-            yield from update_current_view(network, host, port, bcv, path)
-            count -= 1
-            if count <= 0:
-                return bcv
+            futures.append(update_current_view(network, host, port, bcv, path))
+            if len(futures) >= count:
+                return futures
 
+
+@asyncio.coroutine
+def update_chain_state(network, path, count=3):
+    bcv = get_current_view(path)
+    futures = yield from create_update_futures(network, path, bcv, count)
+    yield from asyncio.wait(futures)
+    return bcv
 
 def main():
     parser = argparse.ArgumentParser(description="Update chain state and print summary.")

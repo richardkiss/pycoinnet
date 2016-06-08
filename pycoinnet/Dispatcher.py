@@ -6,6 +6,7 @@ class Dispatcher:
         self._handlers = dict()
         self._handler_id = 0
         self._peer = peer
+        self._task = None
 
     def add_msg_handler(self, msg_handler):
         handler_id = self._handler_id
@@ -27,6 +28,12 @@ class Dispatcher:
                 loop.create_task(m(name, data))
             else:
                 m(name, data)
+
+    def start(self):
+        self._task = asyncio.get_event_loop().create_task(self.dispatch_messages())
+
+    def stop(self):
+        self._task.cancel()
 
     @asyncio.coroutine
     def wait_for_response(self, *response_types):
