@@ -1,5 +1,6 @@
 
 import asyncio
+import collections
 import logging
 import weakref
 
@@ -24,7 +25,7 @@ class Blockfetcher:
         # this queue accepts tuples of the form:
         #  (priority, InvItem(ITEM_TYPE_BLOCK, block_hash), future, peers_tried)
         self._block_hash_priority_queue = asyncio.PriorityQueue()
-        self._retry_priority_queue = asyncio.PriorityQueue()
+        self._retry_priority_queue = collections.deque()
         self._get_batch_lock = asyncio.Lock()
         self._futures = weakref.WeakValueDictionary()
         self._max_batch_size = max_batch_size
@@ -77,11 +78,11 @@ class Blockfetcher:
         becomes valid, or None if there aren't any.
         """
         now = asyncio.get_event_loop().time()
-        while not self._retry_priority_queue.empty():
-            retry_time, items = self._retry_priority_queue.get_nowait()
+        while len(self._retry_priority_queue) > 0:
+            retry_time, items = self._retry_priority_queue[0]
             if retry_time > now:
-                self._retry_priority_queue.put_nowait((retry_time, items))
                 return retry_time - now
+            self._retry_priority_queue.popleft()
             first_pri = None
             last_pri = None
             for item in items:
@@ -136,7 +137,7 @@ class Blockfetcher:
                 futures.append(block_future)
                 items.append(item)
             now = asyncio.get_event_loop().time()
-            self._retry_priority_queue.put_nowait((now + self._max_batch_timeout, items))
+            self._retry_priority_queue.append((now + self._max_batch_timeout, items))
             for item in skipped:
                 self._block_hash_priority_queue.put_nowait(item)
             if skipped:
