@@ -49,6 +49,12 @@ class TimelessTransport(asyncio.Transport):
     def write(self, data):
         self._loop.call_later(self._latency, self._remote_protocol.data_received, data)
 
+    def close(self):
+        def later():
+            self._remote_protocol.eof_received()
+            self._remote_protocol.connection_lost(None)
+        self._loop.call_later(self._latency, later)
+
 
 def create_timeless_transport_pair(pf1, pf2=None):
     if pf2 is None:
