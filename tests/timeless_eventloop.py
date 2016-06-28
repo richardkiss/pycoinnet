@@ -41,12 +41,15 @@ def use_timeless_eventloop():
 
 
 class TimelessTransport(asyncio.Transport):
-    def __init__(self, remote_protocol, latency=0.2):
+    def __init__(self, remote_protocol, latency=2.0):
         self._remote_protocol = remote_protocol
         self._loop = asyncio.get_event_loop()
         self._latency = latency
+        self._is_closing = False
 
     def write(self, data):
+        if self._is_closing:
+            raise RuntimeError("can't write to closed transport")
         self._loop.call_later(self._latency, self._remote_protocol.data_received, data)
 
     def close(self):
@@ -54,6 +57,7 @@ class TimelessTransport(asyncio.Transport):
             self._remote_protocol.eof_received()
             self._remote_protocol.connection_lost(None)
         self._loop.call_later(self._latency, later)
+        self._is_closing = True
 
 
 def create_timeless_transport_pair(pf1, pf2=None):
