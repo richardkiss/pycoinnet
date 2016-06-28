@@ -17,6 +17,31 @@ def create_pair():
     return p1, p2
 
 
+@asyncio.coroutine
+def handle_getdata(peer, block_lookup, delay=0.1):
+    while True:
+        try:
+            msg, data = yield from peer.next_message()
+        except Exception:
+            break
+        if msg == 'getdata':
+            for inv in data.get("items"):
+                if inv.item_type == ITEM_TYPE_BLOCK:
+                    yield from asyncio.sleep(delay)
+                    b = block_lookup[inv.data]
+                    peer.send_msg("block", block=b)
+
+
+@asyncio.coroutine
+def handle_getdata3(peer, bf):
+    while True:
+        try:
+            msg, data = yield from peer.next_message()
+        except Exception:
+            break
+        bf.handle_msg(msg, data)
+
+
 class BlockfetcherTest(unittest.TestCase):
     def setUp(self):
         use_timeless_eventloop()
@@ -32,31 +57,8 @@ class BlockfetcherTest(unittest.TestCase):
         blockfetcher.add_peer(peer3_1)
         blockfetcher.add_peer(peer3_2)
 
-        @asyncio.coroutine
-        def handle_getdata(peer, delay=0.1):
-            while True:
-                try:
-                    msg, data = yield from peer.next_message()
-                except Exception:
-                    break
-                if msg == 'getdata':
-                    for inv in data.get("items"):
-                        if inv.item_type == ITEM_TYPE_BLOCK:
-                            yield from asyncio.sleep(delay)
-                            b = self.block_lookup[inv.data]
-                            peer.send_msg("block", block=b)
-
-        loop.create_task(handle_getdata(peer1_3, delay=d13))
-        loop.create_task(handle_getdata(peer2_3, delay=d23))
-
-        @asyncio.coroutine
-        def handle_getdata3(peer, bf):
-            while True:
-                try:
-                    msg, data = yield from peer.next_message()
-                except Exception:
-                    break
-                bf.handle_msg(msg, data)
+        loop.create_task(handle_getdata(peer1_3, self.block_lookup, delay=d13))
+        loop.create_task(handle_getdata(peer2_3, self.block_lookup, delay=d23))
 
         loop.create_task(handle_getdata3(peer3_1, blockfetcher))
         loop.create_task(handle_getdata3(peer3_2, blockfetcher))
@@ -67,6 +69,11 @@ class BlockfetcherTest(unittest.TestCase):
         for bf, block1 in zip(block_futures, self.BLOCK_LIST):
             block = loop.run_until_complete(bf)
             assert block.id() == block1.id()
+
+        for p in peer1_3, peer2_3, peer3_1, peer3_2:
+            p._transport.close()
+        loop.stop()
+        loop.run_forever()
 
     def test_BlockHandler(self):
         for d13 in (0, 0.5, 5.0):
