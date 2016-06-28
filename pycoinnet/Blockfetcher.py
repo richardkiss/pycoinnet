@@ -32,6 +32,7 @@ class Blockfetcher:
         self._initial_batch_size = initial_batch_size
         self._target_batch_time = target_batch_time
         self._max_batch_timeout = max_batch_timeout
+        self._peer_locks = dict()
 
     def fetch_blocks(self, block_hash_priority_pair_list):
         """
@@ -43,6 +44,8 @@ class Blockfetcher:
         Returns: a list of futures, each corresponding to a tuple.
         """
         r = []
+        if self._block_hash_priority_queue.empty():
+            self._kick_all_peers()
         for bh, pri in block_hash_priority_pair_list:
             f = asyncio.Future()
             peers_tried = set()
@@ -52,11 +55,40 @@ class Blockfetcher:
             self._futures[bh] = f
         return r
 
+    def fetch_block(self, priority, block_hash, peer):
+        """
+        This fetches a block from a SPECIFIC peer. It's designed to respond
+        to an inv message.
+
+        Returns: a future for the block.
+        """
+        # request the block from the given peer
+        # put it in the retry queue
+        if self._block_hash_priority_queue.empty():
+            self._kick_all_peers()
+        f = asyncio.Future()
+        item = (priority, block_hash, f, set([peer]))
+        self._futures[block_hash] = f
+        now = asyncio.get_event_loop().time()
+        self._retry_priority_queue.append((now + self._max_batch_timeout, [item]))
+        peer.send_msg("getdata", items=InvItem(ITEM_TYPE_BLOCK, block_hash))
+        return f
+
     def add_peer(self, peer):
         """
         Register a new peer, and start the loop which polls it for blocks.
         """
-        asyncio.get_event_loop().create_task(self._fetcher_loop(peer))
+        self._peer_locks[peer] = asyncio.Lock()
+        self._kick_peer(peer)
+
+    def _kick_peer(self, peer):
+        lock = self._peer_locks[peer]
+        if not lock.locked():
+            asyncio.get_event_loop().create_task(self._fetcher_loop(peer))
+
+    def _kick_all_peers(self):
+        for peer in self._peer_locks.keys():
+            self._kick_peer(peer)
 
     def handle_msg(self, name, data):
         """
@@ -70,7 +102,6 @@ class Blockfetcher:
                 f.set_result(block)
                 del self._futures[bh]
 
-    @asyncio.coroutine
     def _check_retry_q(self):
         """
         Deal with retry queue.
@@ -81,8 +112,10 @@ class Blockfetcher:
         while len(self._retry_priority_queue) > 0:
             retry_time, items = self._retry_priority_queue[0]
             if retry_time > now:
-                return retry_time - now
+                break
             self._retry_priority_queue.popleft()
+            if self._block_hash_priority_queue.empty():
+                self._kick_all_peers()
             first_pri = None
             last_pri = None
             for item in items:
@@ -98,7 +131,6 @@ class Blockfetcher:
                     logging.info("timeout, retrying block %s", first_pri)
                 else:
                     logging.info("timeout, retrying blocks %s - %s", first_pri, last_pri)
-        return None
 
     @asyncio.coroutine
     def _get_batch(self, batch_size, peer):
@@ -109,7 +141,7 @@ class Blockfetcher:
         """
         with (yield from self._get_batch_lock):
             logging.info("getting batch up to size %d for %s", batch_size, peer)
-            wait_timeout = yield from self._check_retry_q()
+            self._check_retry_q()
 
             # build a batch
             skipped = []
@@ -117,15 +149,9 @@ class Blockfetcher:
             inv_items = []
             futures = []
             while len(futures) < batch_size:
-                if self._block_hash_priority_queue.empty() and len(futures) > 0:
+                if self._block_hash_priority_queue.empty():
                     break
-                try:
-                    item = yield from asyncio.wait_for(
-                        self._block_hash_priority_queue.get(), timeout=wait_timeout)
-                except asyncio.TimeoutError:
-                    logging.info("timeout, retry queue firing")
-                    wait_timeout = yield from self._check_retry_q()
-                    continue
+                item = yield from self._block_hash_priority_queue.get()
                 (pri, block_hash, block_future, peers_tried) = item
                 if block_future.done():
                     continue
@@ -157,25 +183,30 @@ class Blockfetcher:
         it grabs another, so two overlapping batches are always being
         downloaded simultaneously.
         """
-        batch_size = self._initial_batch_size
-        loop = asyncio.get_event_loop()
-        try:
-            batch_1, start_batch_time_1 = yield from self._get_batch(batch_size=batch_size, peer=peer)
-            while True:
-                batch_2, start_batch_time_2 = yield from self._get_batch(batch_size=batch_size, peer=peer)
-                yield from asyncio.wait(batch_1, timeout=self._max_batch_timeout)
-                # see how many items we got
-                item_count = sum(1 for f in batch_1 if f.done())
-                # calculate new batch size
-                batch_time = loop.time() - start_batch_time_1
-                logging.info("got %d items from batch size %d in %s s",
-                             item_count, len(batch_1), batch_time)
-                time_per_item = batch_time / max(1, item_count)
-                batch_size = min(int(self._target_batch_time / time_per_item) + 1, self._max_batch_size)
-                batch_1 = batch_2
-                logging.info("new batch size is %d", batch_size)
-                start_batch_time_1 = start_batch_time_2
-        except EOFError:
-            logging.info("peer %s disconnected", peer)
-        except Exception:
-            logging.exception("problem with peer %s", peer)
+        lock = self._peer_locks[peer]
+        if lock.locked():
+            return
+        with (yield from lock):
+            batch_size = self._initial_batch_size
+            loop = asyncio.get_event_loop()
+            try:
+                batch_1, start_batch_time_1 = yield from self._get_batch(batch_size=batch_size, peer=peer)
+                while len(batch_1) > 0:
+                    batch_2, start_batch_time_2 = yield from self._get_batch(
+                        batch_size=batch_size, peer=peer)
+                    yield from asyncio.wait(batch_1, timeout=self._max_batch_timeout)
+                    # see how many items we got
+                    item_count = sum(1 for f in batch_1 if f.done())
+                    # calculate new batch size
+                    batch_time = loop.time() - start_batch_time_1
+                    logging.info("got %d items from batch size %d in %s s",
+                                 item_count, len(batch_1), batch_time)
+                    time_per_item = batch_time / max(1, item_count)
+                    batch_size = min(int(self._target_batch_time / time_per_item) + 1, self._max_batch_size)
+                    batch_1 = batch_2
+                    logging.info("new batch size is %d", batch_size)
+                    start_batch_time_1 = start_batch_time_2
+            except EOFError:
+                logging.info("peer %s disconnected", peer)
+            except Exception:
+                logging.exception("problem with peer %s", peer)
