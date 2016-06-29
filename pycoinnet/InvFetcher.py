@@ -15,7 +15,7 @@ class InvFetcher:
     """
     def __init__(self, peer, batch_size=50000):
         """
-        peer: a BitcoinPeerProtocol object
+        peer: a Peer object
         batch_size: maximum number of objects to include in a single "getdata" message
         """
         self._peer = peer

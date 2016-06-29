@@ -7,13 +7,18 @@ from pycoinnet.networks import MAINNET
 from pycoinnet.msg.InvItem import ITEM_TYPE_BLOCK
 
 from pycoinnet.Blockfetcher import Blockfetcher
-from pycoinnet.PeerProtocol import PeerProtocol
+from pycoinnet.Peer import Peer
 
-from tests.timeless_eventloop import create_timeless_transport_pair, use_timeless_eventloop
+from tests.timeless_eventloop import create_timeless_streams_pair, use_timeless_eventloop
+
+
+run = asyncio.get_event_loop().run_until_complete
 
 
 def create_pair():
-    (t1, p1), (t2, p2) = create_timeless_transport_pair(lambda: PeerProtocol(MAINNET))
+    (r1, w1), (r2, w2) = create_timeless_streams_pair()
+    p1 = Peer(r1, w1, MAINNET.magic_header, MAINNET.parse_from_data, MAINNET.pack_from_data)
+    p2 = Peer(r2, w2, MAINNET.magic_header, MAINNET.parse_from_data, MAINNET.pack_from_data)
     return p1, p2
 
 
@@ -71,7 +76,7 @@ class BlockfetcherTest(unittest.TestCase):
             assert block.id() == block1.id()
 
         for p in peer1_3, peer2_3, peer3_1, peer3_2:
-            p._transport.close()
+            p.close()
         loop.stop()
         loop.run_forever()
 

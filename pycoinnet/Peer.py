@@ -81,4 +81,4 @@ class Peer:
         self._writer.close()
 
     def __repr__(self):
-        return "<Peer %s>" % str(self._reader)
+        return "<Peer %s>" % str(self._reader._transport)

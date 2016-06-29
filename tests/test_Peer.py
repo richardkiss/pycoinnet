@@ -6,8 +6,7 @@ from pycoinnet.msg.InvItem import InvItem
 from pycoinnet.msg.PeerAddress import PeerAddress
 from pycoinnet.networks import MAINNET
 
-from tests.pipes import create_pipe_pairs, create_pipe_streams
-from tests.timeless_eventloop import create_timeless_transport_pair, use_timeless_eventloop
+from tests.timeless_eventloop import create_timeless_streams_pair, use_timeless_eventloop
 
 
 # from peer.helper import (PeerTransport, MAGIC_HEADER, VERSION_MSG_BIN,
@@ -18,29 +17,17 @@ def run(f):
     return asyncio.get_event_loop().run_until_complete(f)
 
 
-def connect_pair_unix():
-    """Return a pair PeerProtocol objects connected through a pipe"""
-    return run(create_pipe_pairs(lambda: PeerProtocol(MAINNET)))
-
-
-def connect_pair_timeless():
-    (t1, p1), (t2, p2) = create_timeless_transport_pair(lambda: PeerProtocol(MAINNET))
-    return p1, p2
-
-connect_pair = connect_pair_timeless
-
-
 class PeerTest(unittest.TestCase):
     def setUp(self):
         use_timeless_eventloop()
 
     def create_peer_pair(self):
-        (r1, w1), (r2, w2) = run(create_pipe_streams())
+        (r1, w1), (r2, w2) = create_timeless_streams_pair()
         p1 = Peer(r1, w1, MAINNET.magic_header, MAINNET.parse_from_data, MAINNET.pack_from_data)
         p2 = Peer(r2, w2, MAINNET.magic_header, MAINNET.parse_from_data, MAINNET.pack_from_data)
         return p1, p2
 
-    def test_PeerProtocol_blank_messages(self):
+    def test_Peer_blank_messages(self):
         p1, p2 = self.create_peer_pair()
         for t in ["verack", "getaddr", "mempool", "filterclear"]:
             t1 = p1.send_msg(t)
@@ -72,7 +59,7 @@ class PeerTest(unittest.TestCase):
             t2 = run(p2.next_message())
             assert t2 == (t, d)
 
-    def test_PeerProtocol_ping_pong(self):
+    def test_Peer_ping_pong(self):
         p1, p2 = self.create_peer_pair()
         for nonce in (1, 11, 111123, 8888888817129829):
             for t in "ping pong".split():

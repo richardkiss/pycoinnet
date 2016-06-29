@@ -18,7 +18,7 @@ from pycoinnet.networks import MAINNET
 
 from pycoinnet.BlockChainView import BlockChainView, HASH_INITIAL_BLOCK
 from pycoinnet.Dispatcher import Dispatcher
-from pycoinnet.PeerProtocol import PeerProtocol
+from pycoinnet.Peer import Peer
 
 
 LOG_FORMAT = ('%(asctime)s [%(process)d] [%(levelname)s] '
@@ -84,10 +84,9 @@ def do_get_headers(peer, dispatcher, block_locator_hashes, hash_stop=b'\0'*32):
 
 @asyncio.coroutine
 def update_current_view(network, host, port, bcv, path):
-    loop = asyncio.get_event_loop()
-    transport, peer = yield from loop.create_connection(
-        lambda: PeerProtocol(network), host=host, port=port)
+    reader, writer = yield from asyncio.open_connection(host=host, port=port)
     logging.info("connecting to %s:%d", host, port)
+    peer = Peer(reader, writer, MAINNET.magic_header, MAINNET.parse_from_data, MAINNET.pack_from_data)
     dispatcher = Dispatcher(peer)
     yield from dispatcher.handshake(**VERSION_MSG)
     dispatcher.start()
