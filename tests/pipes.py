@@ -22,7 +22,7 @@ def create_pipe_pairs(protocol_factory):
 
 
 @asyncio.coroutine
-def create_pipe_streams():
+def create_pipe_streams_pair():
     path = tempfile.mktemp()
     loop = asyncio.get_event_loop()
     server_side = asyncio.Future()

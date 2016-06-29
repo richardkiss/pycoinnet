@@ -77,6 +77,9 @@ class Peer:
             message_data = self._parse_from_data(message_name, message_data)
         return message_name, message_data
 
+    def write_eof(self):
+        self._writer.write_eof()
+
     def close(self):
         self._writer.close()
 
