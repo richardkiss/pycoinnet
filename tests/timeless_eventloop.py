@@ -49,7 +49,7 @@ class TimelessTransport(asyncio.Transport):
 
     def write(self, data):
         if self._is_closing:
-            raise RuntimeError("can't write to closed transport")
+            return
         self._loop.call_later(self._latency, self._remote_protocol.data_received, data)
 
     def close(self):
@@ -59,6 +59,8 @@ class TimelessTransport(asyncio.Transport):
         self._loop.call_later(self._latency, later)
         self._is_closing = True
 
+    def is_closing(self):
+        return self._is_closing
 
 def create_timeless_transport_pair(pf1, pf2=None):
     if pf2 is None:

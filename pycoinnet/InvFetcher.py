@@ -103,7 +103,7 @@ class InvFetcher:
         """
         if msg_name is None:
             self._is_closed = True
-            for f in self._futures:
+            for f in self._futures.values():
                 if not f.done():
                     f.set_exception(EOFError())
         if msg_name in self.ITEM_LOOKUP:

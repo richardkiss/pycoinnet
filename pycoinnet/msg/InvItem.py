@@ -11,7 +11,7 @@ class InvItem(object):
 
     def __str__(self):
         INV_TYPES = [None, "Tx", "Block", "Merkle"]
-        return "%s [%s]" % (INV_TYPES[self.item_type], b2h_rev(self.data))
+        return "InvItem %s [%s]" % (INV_TYPES[self.item_type], b2h_rev(self.data))
 
     def __repr__(self):
         return str(self)

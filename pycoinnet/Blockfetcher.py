@@ -1,4 +1,3 @@
-
 import asyncio
 import collections
 import logging
@@ -184,7 +183,7 @@ class Blockfetcher:
         downloaded simultaneously.
         """
         lock = self._peer_locks[peer]
-        if lock.locked():
+        if lock.locked() or peer.is_closing():
             return
         with (yield from lock):
             batch_size = self._initial_batch_size
@@ -210,3 +209,7 @@ class Blockfetcher:
                 logging.info("peer %s disconnected", peer)
             except Exception:
                 logging.exception("problem with peer %s", peer)
+
+    def close(self):
+        for peer in self._peer_locks.keys():
+            peer.close()

@@ -17,7 +17,6 @@ from pycoinnet.msg.PeerAddress import PeerAddress
 from pycoinnet.networks import MAINNET
 
 from pycoinnet.BlockChainView import BlockChainView, HASH_INITIAL_BLOCK
-from pycoinnet.Dispatcher import Dispatcher
 from pycoinnet.Peer import Peer
 
 
@@ -63,21 +62,21 @@ VERSION_MSG = dict(
 
 
 @asyncio.coroutine
-def _fetch_missing(peer, dispatcher, header):
+def _fetch_missing(peer, header):
     the_hash = header.previous_block_hash
     inv_item = InvItem(ITEM_TYPE_BLOCK, the_hash)
     logging.info("requesting missing block header %s", inv_item)
     peer.send_msg("getdata", items=[InvItem(ITEM_TYPE_BLOCK, the_hash)])
-    name, data = yield from dispatcher.wait_for_response('block')
+    name, data = yield from peer.wait_for_response('block')
     block = data["block"]
     logging.info("got missing block %s", block.id())
     return block
 
 
 @asyncio.coroutine
-def do_get_headers(peer, dispatcher, block_locator_hashes, hash_stop=b'\0'*32):
+def do_get_headers(peer, block_locator_hashes, hash_stop=b'\0'*32):
     peer.send_msg(message_name="getheaders", version=1, hashes=block_locator_hashes, hash_stop=hash_stop)
-    name, data = yield from dispatcher.wait_for_response('headers')
+    name, data = yield from peer.wait_for_response('headers')
     headers = [bh for bh, t in data["headers"]]
     return headers
 
@@ -86,22 +85,21 @@ def do_get_headers(peer, dispatcher, block_locator_hashes, hash_stop=b'\0'*32):
 def update_current_view(network, host, port, bcv, path):
     reader, writer = yield from asyncio.open_connection(host=host, port=port)
     logging.info("connecting to %s:%d", host, port)
-    peer = Peer(reader, writer, MAINNET.magic_header, MAINNET.parse_from_data, MAINNET.pack_from_data)
-    dispatcher = Dispatcher(peer)
-    yield from dispatcher.handshake(**VERSION_MSG)
-    dispatcher.start()
+    peer = Peer(reader, writer, network.magic_header, network.parse_from_data, network.pack_from_data)
+    yield from peer.perform_handshake(**VERSION_MSG)
+    peer.start_dispatcher()
 
     while True:
         block_locator_hashes = bcv.block_locator_hashes()
-        headers = yield from do_get_headers(peer, dispatcher, bcv.block_locator_hashes())
+        headers = yield from do_get_headers(peer, bcv.block_locator_hashes())
         if block_locator_hashes[-1] == HASH_INITIAL_BLOCK:
             # this hack is necessary because the stupid default client
             # does not send the genesis block!
-            extra_block = yield from _fetch_missing(peer, dispatcher, headers[0])
+            extra_block = yield from _fetch_missing(peer, headers[0])
             headers = [extra_block] + headers
 
         if len(headers) == 0:
-            dispatcher.stop()
+            peer.close()
             return
         block_number = bcv.do_headers_improve_path(headers)
         if block_number is not False:

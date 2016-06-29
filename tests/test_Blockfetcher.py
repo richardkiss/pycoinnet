@@ -22,31 +22,6 @@ def create_pair():
     return p1, p2
 
 
-@asyncio.coroutine
-def handle_getdata(peer, block_lookup, delay=0.1):
-    while True:
-        try:
-            msg, data = yield from peer.next_message()
-        except Exception:
-            break
-        if msg == 'getdata':
-            for inv in data.get("items"):
-                if inv.item_type == ITEM_TYPE_BLOCK:
-                    yield from asyncio.sleep(delay)
-                    b = block_lookup[inv.data]
-                    peer.send_msg("block", block=b)
-
-
-@asyncio.coroutine
-def handle_getdata3(peer, bf):
-    while True:
-        try:
-            msg, data = yield from peer.next_message()
-        except Exception:
-            break
-        bf.handle_msg(msg, data)
-
-
 class BlockfetcherTest(unittest.TestCase):
     def setUp(self):
         use_timeless_eventloop()
@@ -62,11 +37,32 @@ class BlockfetcherTest(unittest.TestCase):
         blockfetcher.add_peer(peer3_1)
         blockfetcher.add_peer(peer3_2)
 
-        loop.create_task(handle_getdata(peer1_3, self.block_lookup, delay=d13))
-        loop.create_task(handle_getdata(peer2_3, self.block_lookup, delay=d23))
+        def make_block_msg_handler(peer, delay):
 
-        loop.create_task(handle_getdata3(peer3_1, blockfetcher))
-        loop.create_task(handle_getdata3(peer3_2, blockfetcher))
+            @asyncio.coroutine
+            def msg_handler(msg, data):
+                if msg == 'getdata':
+                    for inv in data.get("items"):
+                        if inv.item_type == ITEM_TYPE_BLOCK:
+                            yield from asyncio.sleep(delay)
+                            b = self.block_lookup[inv.data]
+                            try:
+                                peer.send_msg("block", block=b)
+                            except Exception as ex:
+                                print(ex)
+                                import pdb
+                                pdb.set_trace()
+                                print("foo")
+            return msg_handler
+
+        peer1_3.add_msg_handler(make_block_msg_handler(peer1_3, delay=d13))
+        peer2_3.add_msg_handler(make_block_msg_handler(peer2_3, delay=d23))
+
+        peer3_1.add_msg_handler(blockfetcher.handle_msg)
+        peer3_2.add_msg_handler(blockfetcher.handle_msg)
+
+        for p in [peer1_3, peer2_3, peer3_1, peer3_2]:
+            p.start_dispatcher()
 
         block_hash_priority_pair_list = [(b.hash(), idx) for idx, b in enumerate(self.BLOCK_LIST)]
         block_futures = blockfetcher.fetch_blocks(block_hash_priority_pair_list)
@@ -77,6 +73,7 @@ class BlockfetcherTest(unittest.TestCase):
 
         for p in peer1_3, peer2_3, peer3_1, peer3_2:
             p.close()
+        blockfetcher.close()
         loop.stop()
         loop.run_forever()
 
