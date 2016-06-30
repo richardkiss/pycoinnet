@@ -151,5 +151,8 @@ class Peer:
     def close(self):
         self._writer.close()
 
+    def is_closing(self):
+        return self._writer._transport.is_closing()
+
     def __repr__(self):
         return "<Peer %s>" % str(self._reader._transport)

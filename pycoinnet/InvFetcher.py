@@ -36,7 +36,6 @@ class InvFetcher:
             self._futures[inv_item] = future
         return future
 
-    @asyncio.coroutine
     def fetch(self, inv_item, timeout=None):
         """
         Return the fetched object or None if the remote says it doesn't have it, or
@@ -50,6 +49,8 @@ class InvFetcher:
             self._request_q.put_nowait(inv_item)
         if self._is_closed:
             future.set_exception(EOFError())
+        if timeout is None:
+            return future
         try:
             return asyncio.wait_for(future, timeout=timeout)
         except asyncio.TimeoutError:
