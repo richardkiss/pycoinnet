@@ -79,6 +79,7 @@ class Blockfetcher:
         """
         self._peer_locks[peer] = asyncio.Lock()
         self._kick_peer(peer)
+        peer.add_msg_handler(self.handle_msg)
 
     def _kick_peer(self, peer):
         lock = self._peer_locks[peer]
@@ -183,7 +184,7 @@ class Blockfetcher:
         downloaded simultaneously.
         """
         lock = self._peer_locks[peer]
-        if lock.locked() or peer.is_closing():
+        if lock.locked():
             return
         with (yield from lock):
             batch_size = self._initial_batch_size

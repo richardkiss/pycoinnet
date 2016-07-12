@@ -41,6 +41,9 @@ class BlockChainView:
             return [t[0], h2b_rev(t[1]), t[2]]
         return BlockChainView(node_tuples=[from_tuple(t) for t in json.loads(the_json)])
 
+    def clone(self):
+        return BlockChainView(node_tuples=list(self.node_tuples))
+
     def last_block_tuple(self):
         if len(self.node_tuples) == 0:
             return GENESIS_TUPLE

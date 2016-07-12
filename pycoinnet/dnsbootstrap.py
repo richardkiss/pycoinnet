@@ -1,11 +1,16 @@
 import asyncio
 
+from socket import gaierror
+
 
 @asyncio.coroutine
 def _populate_queue(getaddr_futures, q):
     hosts_seen = set()
     for f in asyncio.as_completed(getaddr_futures):
-        responses = yield from f
+        try:
+            responses = yield from f
+        except gaierror:
+            continue
         for r in responses:
             pair = r[-1][:2]
             if pair in hosts_seen:

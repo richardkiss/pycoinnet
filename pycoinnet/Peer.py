@@ -155,4 +155,7 @@ class Peer:
         return self._writer._transport.is_closing()
 
     def __repr__(self):
-        return "<Peer %s>" % str(self._reader._transport)
+        peer_info = self._reader._transport.get_extra_info("peername")
+        if peer_info is None:
+            peer_info = self._reader._transport
+        return "<Peer %s>" % str(peer_info)

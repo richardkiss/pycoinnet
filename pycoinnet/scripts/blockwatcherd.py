@@ -14,8 +14,9 @@ from pycoin.serialize import b2h_rev
 from pycoinnet.dnsbootstrap import dns_bootstrap_host_port_q
 from pycoinnet.msg.InvItem import InvItem, ITEM_TYPE_BLOCK
 from pycoinnet.msg.PeerAddress import PeerAddress
-from pycoinnet.networks import MAINNET
+from pycoinnet.networks import MAINNET, TESTNET
 
+from pycoinnet.Blockfetcher import Blockfetcher
 from pycoinnet.BlockChainView import BlockChainView, HASH_INITIAL_BLOCK
 from pycoinnet.Peer import Peer
 
@@ -82,11 +83,19 @@ def do_get_headers(peer, block_locator_hashes, hash_stop=b'\0'*32):
 
 
 @asyncio.coroutine
-def update_current_view(network, host, port, bcv, path):
-    reader, writer = yield from asyncio.open_connection(host=host, port=port)
-    logging.info("connecting to %s:%d", host, port)
+def update_headers(network, q, bcv, update_q, peer_created_callback):
+    while 1:
+        peer_addr = yield from q.get()
+        if peer_addr is None:
+            return
+        host, port = peer_addr
+        logging.info("connecting to %s:%d", host, port)
+        reader, writer = yield from asyncio.open_connection(host=host, port=port)
+        break
+
     peer = Peer(reader, writer, network.magic_header, network.parse_from_data, network.pack_from_data)
     yield from peer.perform_handshake(**VERSION_MSG)
+    peer_created_callback(peer)
     peer.start_dispatcher()
 
     while True:
@@ -99,36 +108,64 @@ def update_current_view(network, host, port, bcv, path):
             headers = [extra_block] + headers
 
         if len(headers) == 0:
-            peer.close()
-            return
+            break
         block_number = bcv.do_headers_improve_path(headers)
-        if block_number is not False:
-            logging.debug("block header count is now %d", block_number)
+        if block_number is False:
+            continue
+        logging.debug("block header count is now %d", block_number)
+        hashes = []
+        for idx in range(block_number, bcv.last_block_index()+1):
+            the_tuple = bcv.tuple_for_index(idx)
+            assert the_tuple[0] == idx
+            hashes.append(the_tuple[1])
+        update_q.put_nowait((block_number, hashes))
         bcv.winnow()
-        save_bcv(path, bcv)
 
 
 @asyncio.coroutine
-def create_update_futures(network, path, bcv, count):
+def update_headers_pipeline(network, bcv, count, update_q, peer_created_callback):
     futures = []
     q = dns_bootstrap_host_port_q(network)
+    bcv_copy = bcv.clone()
     for _ in range(count):
-        peer_addr = yield from q.get()
-        if peer_addr is None:
-            break
-        host, port = peer_addr
-        futures.append(update_current_view(network, host, port, bcv, path))
+        futures.append(
+            update_headers(network, q, bcv_copy, update_q, peer_created_callback))
         if len(futures) >= count:
             break
-    return futures
+    yield from asyncio.wait(futures)
+    update_q.put_nowait(None)
 
 
 @asyncio.coroutine
-def update_chain_state(network, path, count=3):
-    bcv = get_current_view(path)
-    futures = yield from create_update_futures(network, path, bcv, count)
-    yield from asyncio.wait(futures)
-    return bcv
+def handle_update_q(bcv, path, block_fetcher, update_q):
+    MAX_BATCH_SIZE = 32
+    block_update = []
+    loop = asyncio.get_event_loop()
+    while 1:
+        v = yield from update_q.get()
+        if v is None:
+            break
+        first_block_index, block_hashes = v
+        print("got %d new header(s) starting at %d" % (len(block_hashes), first_block_index))
+        block_hash_priority_pair_list = [(bh, first_block_index + _) for _, bh in enumerate(block_hashes)]
+        block_futures = block_fetcher.fetch_blocks(block_hash_priority_pair_list)
+        for _, bf in enumerate(block_futures):
+            block = yield from bf
+            block_index = first_block_index + _
+            block_update.append((block_index, block))
+            if len(block_update) >= MAX_BATCH_SIZE:
+                yield from loop.run_in_executor(None, flush_block_update, bcv, path, block_update)
+    yield from loop.run_in_executor(None, flush_block_update, bcv, path, block_update)
+
+
+def flush_block_update(bcv, path, block_update):
+    block_index, block = block_update[0]
+    logging.info("updating %d blocks starting at %d for path %s" % (len(block_update), block_index, path))
+    block_number = bcv.do_headers_improve_path([block for _, block in block_update])
+    if block_number is not False:
+        bcv.winnow()
+        save_bcv(path, bcv)
+    block_update[:] = []
 
 
 def main():
@@ -138,9 +175,17 @@ def main():
     args = parser.parse_args()
     path = os.path.join(args.path or storage_base_path(), "chainstate.json")
 
+    block_fetcher = Blockfetcher()
     loop = asyncio.get_event_loop()
-    bcv = loop.run_until_complete(update_chain_state(MAINNET, path))
+    bcv = get_current_view(path)
+    network = TESTNET
+
+    update_q = asyncio.Queue()
+    update_q_task = loop.create_task(handle_update_q(bcv, path, block_fetcher, update_q))
+    loop.run_until_complete(update_headers_pipeline(
+        network, bcv, count=3, update_q=update_q, peer_created_callback=block_fetcher.add_peer))
     last_index, last_block_hash, total_work = bcv.last_block_tuple()
+    loop.run_until_complete(update_q_task)
     print("last block index %d, hash %s" % (last_index, b2h_rev(last_block_hash)))
 
 
