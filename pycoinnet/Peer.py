@@ -131,6 +131,10 @@ class Peer:
         self.close()
 
     @asyncio.coroutine
+    def wait_for_cleanup(self):
+        yield from self._dispatcher_task
+
+    @asyncio.coroutine
     def wait_for_response(self, *response_types):
         future = asyncio.Future()
 

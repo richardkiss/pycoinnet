@@ -166,6 +166,8 @@ def handle_update_q(bcv, path, block_future_q, max_batch_size):
 
 
 def flush_block_update(bcv, path, block_update):
+    if not block_update:
+        return
     block_index, block = block_update[0]
     logging.info("updating %d blocks starting at %d for path %s" % (len(block_update), block_index, path))
     block_number = bcv.do_headers_improve_path([block for _, block in block_update])
@@ -192,12 +194,22 @@ def main():
     handle_headers_q_task = loop.create_task(handle_headers_q(block_fetcher, update_q, block_future_q))
     handle_update_q_task = loop.create_task(handle_update_q(bcv, path, block_future_q, max_batch_size=128))
 
+    peers = []
+
+    def add_peer(peer):
+        block_fetcher.add_peer(peer)
+        peers.append(peer)
+    
     loop.run_until_complete(update_headers_pipeline(
-        network, bcv, count=3, update_q=update_q, peer_created_callback=block_fetcher.add_peer))
+        network, bcv, count=3, update_q=update_q, peer_created_callback=add_peer))
     last_index, last_block_hash, total_work = bcv.last_block_tuple()
 
     loop.run_until_complete(handle_headers_q_task)
     loop.run_until_complete(handle_update_q_task)
+
+    for peer in peers:
+        peer.close()
+        loop.run_until_complete(peer.wait_for_cleanup())
     print("last block index %d, hash %s" % (last_index, b2h_rev(last_block_hash)))
 
 
