@@ -163,7 +163,8 @@ class Blockfetcher:
                 futures.append(block_future)
                 items.append(item)
             now = asyncio.get_event_loop().time()
-            self._retry_priority_queue.append((now + self._max_batch_timeout, items))
+            if items:
+                self._retry_priority_queue.append((now + self._max_batch_timeout, items))
             for item in skipped:
                 self._block_hash_priority_queue.put_nowait(item)
             if skipped:
@@ -171,8 +172,9 @@ class Blockfetcher:
                              skipped[0][0], skipped[-1][0], peer)
             logging.info("returning batch of size %d for %s", len(futures), peer)
         start_batch_time = asyncio.get_event_loop().time()
-        peer.send_msg("getdata", items=inv_items)
-        logging.debug("requested %s from %s", [item[0] for item in items], peer)
+        if inv_items:
+            peer.send_msg("getdata", items=inv_items)
+            logging.debug("requested %s from %s", [item[0] for item in items], peer)
         return futures, start_batch_time
 
     @asyncio.coroutine

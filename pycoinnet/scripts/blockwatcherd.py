@@ -130,31 +130,38 @@ def update_headers_pipeline(network, bcv, count, update_q, peer_created_callback
     for _ in range(count):
         futures.append(
             update_headers(network, q, bcv_copy, update_q, peer_created_callback))
-        if len(futures) >= count:
-            break
     yield from asyncio.wait(futures)
     update_q.put_nowait(None)
 
 
 @asyncio.coroutine
-def handle_update_q(bcv, path, block_fetcher, update_q):
-    MAX_BATCH_SIZE = 32
-    block_update = []
-    loop = asyncio.get_event_loop()
+def handle_headers_q(block_fetcher, update_q, block_future_q):
     while 1:
         v = yield from update_q.get()
         if v is None:
             break
         first_block_index, block_hashes = v
-        print("got %d new header(s) starting at %d" % (len(block_hashes), first_block_index))
+        logging.info("got %d new header(s) starting at %d" % (len(block_hashes), first_block_index))
         block_hash_priority_pair_list = [(bh, first_block_index + _) for _, bh in enumerate(block_hashes)]
         block_futures = block_fetcher.fetch_blocks(block_hash_priority_pair_list)
         for _, bf in enumerate(block_futures):
-            block = yield from bf
-            block_index = first_block_index + _
-            block_update.append((block_index, block))
-            if len(block_update) >= MAX_BATCH_SIZE:
-                yield from loop.run_in_executor(None, flush_block_update, bcv, path, block_update)
+            yield from block_future_q.put((first_block_index + _, bf))
+    yield from block_future_q.put(None)
+
+
+@asyncio.coroutine
+def handle_update_q(bcv, path, block_future_q, max_batch_size):
+    block_update = []
+    loop = asyncio.get_event_loop()
+    while 1:
+        v = yield from block_future_q.get()
+        if v is None:
+            break
+        block_index, bf = v
+        block = yield from bf
+        block_update.append((block_index, block))
+        if len(block_update) >= max_batch_size:
+            yield from loop.run_in_executor(None, flush_block_update, bcv, path, block_update)
     yield from loop.run_in_executor(None, flush_block_update, bcv, path, block_update)
 
 
@@ -181,11 +188,16 @@ def main():
     network = TESTNET
 
     update_q = asyncio.Queue()
-    update_q_task = loop.create_task(handle_update_q(bcv, path, block_fetcher, update_q))
+    block_future_q = asyncio.Queue(maxsize=1000)
+    handle_headers_q_task = loop.create_task(handle_headers_q(block_fetcher, update_q, block_future_q))
+    handle_update_q_task = loop.create_task(handle_update_q(bcv, path, block_future_q, max_batch_size=128))
+
     loop.run_until_complete(update_headers_pipeline(
         network, bcv, count=3, update_q=update_q, peer_created_callback=block_fetcher.add_peer))
     last_index, last_block_hash, total_work = bcv.last_block_tuple()
-    loop.run_until_complete(update_q_task)
+
+    loop.run_until_complete(handle_headers_q_task)
+    loop.run_until_complete(handle_update_q_task)
     print("last block index %d, hash %s" % (last_index, b2h_rev(last_block_hash)))
 
 
