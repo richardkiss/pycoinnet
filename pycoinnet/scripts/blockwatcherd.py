@@ -12,12 +12,12 @@ import os.path
 from pycoin.serialize import b2h_rev
 
 from pycoinnet.dnsbootstrap import dns_bootstrap_host_port_q
-from pycoinnet.msg.InvItem import InvItem, ITEM_TYPE_BLOCK
+from pycoinnet.headerpipeline import improve_headers
 from pycoinnet.msg.PeerAddress import PeerAddress
 from pycoinnet.networks import MAINNET, TESTNET
 
 from pycoinnet.Blockfetcher import Blockfetcher
-from pycoinnet.BlockChainView import BlockChainView, HASH_INITIAL_BLOCK
+from pycoinnet.BlockChainView import BlockChainView
 from pycoinnet.Peer import Peer
 
 
@@ -63,26 +63,6 @@ VERSION_MSG = dict(
 
 
 @asyncio.coroutine
-def _fetch_missing(peer, header):
-    the_hash = header.previous_block_hash
-    inv_item = InvItem(ITEM_TYPE_BLOCK, the_hash)
-    logging.info("requesting missing block header %s", inv_item)
-    peer.send_msg("getdata", items=[InvItem(ITEM_TYPE_BLOCK, the_hash)])
-    name, data = yield from peer.wait_for_response('block')
-    block = data["block"]
-    logging.info("got missing block %s", block.id())
-    return block
-
-
-@asyncio.coroutine
-def do_get_headers(peer, block_locator_hashes, hash_stop=b'\0'*32):
-    peer.send_msg(message_name="getheaders", version=1, hashes=block_locator_hashes, hash_stop=hash_stop)
-    name, data = yield from peer.wait_for_response('headers')
-    headers = [bh for bh, t in data["headers"]]
-    return headers
-
-
-@asyncio.coroutine
 def update_headers(network, q, bcv, update_q, peer_created_callback):
     while 1:
         peer_addr = yield from q.get()
@@ -97,29 +77,8 @@ def update_headers(network, q, bcv, update_q, peer_created_callback):
     yield from peer.perform_handshake(**VERSION_MSG)
     peer_created_callback(peer)
     peer.start_dispatcher()
-
-    while True:
-        block_locator_hashes = bcv.block_locator_hashes()
-        headers = yield from do_get_headers(peer, bcv.block_locator_hashes())
-        if block_locator_hashes[-1] == HASH_INITIAL_BLOCK:
-            # this hack is necessary because the stupid default client
-            # does not send the genesis block!
-            extra_block = yield from _fetch_missing(peer, headers[0])
-            headers = [extra_block] + headers
-
-        if len(headers) == 0:
-            break
-        block_number = bcv.do_headers_improve_path(headers)
-        if block_number is False:
-            continue
-        logging.debug("block header count is now %d", block_number)
-        hashes = []
-        for idx in range(block_number, bcv.last_block_index()+1):
-            the_tuple = bcv.tuple_for_index(idx)
-            assert the_tuple[0] == idx
-            hashes.append(the_tuple[1])
-        update_q.put_nowait((block_number, hashes))
-        bcv.winnow()
+    yield from improve_headers(peer, bcv, update_q)
+    bcv.winnow()
 
 
 @asyncio.coroutine
@@ -199,7 +158,7 @@ def main():
     def add_peer(peer):
         block_fetcher.add_peer(peer)
         peers.append(peer)
-    
+
     loop.run_until_complete(update_headers_pipeline(
         network, bcv, count=3, update_q=update_q, peer_created_callback=add_peer))
     last_index, last_block_hash, total_work = bcv.last_block_tuple()
@@ -209,6 +168,7 @@ def main():
 
     for peer in peers:
         peer.close()
+    for peer in peers:
         loop.run_until_complete(peer.wait_for_cleanup())
     print("last block index %d, hash %s" % (last_index, b2h_rev(last_block_hash)))
 

@@ -206,7 +206,7 @@ class Blockfetcher:
                     time_per_item = batch_time / max(1, item_count)
                     batch_size = min(int(self._target_batch_time / time_per_item) + 1, self._max_batch_size)
                     batch_1 = batch_2
-                    logging.info("new batch size is %d", batch_size)
+                    logging.info("new batch size for %s is %d", peer, batch_size)
                     start_batch_time_1 = start_batch_time_2
             except EOFError:
                 logging.info("peer %s disconnected", peer)
