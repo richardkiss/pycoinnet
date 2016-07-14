@@ -3,7 +3,7 @@ import collections
 import logging
 import weakref
 
-from pycoinnet.msg.InvItem import InvItem, ITEM_TYPE_BLOCK
+from pycoin.message.InvItem import InvItem, ITEM_TYPE_BLOCK
 
 
 class Blockfetcher:

@@ -1,7 +1,7 @@
 import asyncio
 import weakref
 
-from pycoinnet.msg.InvItem import InvItem, ITEM_TYPE_TX, ITEM_TYPE_BLOCK, ITEM_TYPE_MERKLEBLOCK
+from pycoin.message.InvItem import InvItem, ITEM_TYPE_TX, ITEM_TYPE_BLOCK, ITEM_TYPE_MERKLEBLOCK
 
 
 class InvFetcher:

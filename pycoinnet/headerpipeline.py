@@ -1,9 +1,9 @@
 import asyncio
 import logging
 
-from pycoinnet.BlockChainView import HASH_INITIAL_BLOCK
+from pycoin.message.InvItem import InvItem, ITEM_TYPE_BLOCK
 
-from pycoinnet.msg.InvItem import InvItem, ITEM_TYPE_BLOCK
+from pycoinnet.BlockChainView import HASH_INITIAL_BLOCK
 
 
 @asyncio.coroutine

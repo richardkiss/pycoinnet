@@ -5,11 +5,11 @@ import binascii
 from collections import namedtuple
 
 from pycoin.block import Block, BlockHeader
-from pycoin.tx.Tx import Tx
-
-from pycoinnet.msg.make_parser_and_packer import (
+from pycoin.message.make_parser_and_packer import (
     make_parser_and_packer, standard_messages,
-    standard_message_post_unpacks, standard_streamer, standard_parsing_functions)
+    standard_message_post_unpacks, standard_streamer, standard_parsing_functions
+)
+from pycoin.tx.Tx import Tx
 
 Network = namedtuple(
     'Network', (

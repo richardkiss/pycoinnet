@@ -9,11 +9,11 @@ import asyncio
 import logging
 import os.path
 
+from pycoin.message.PeerAddress import PeerAddress
 from pycoin.serialize import b2h_rev
 
 from pycoinnet.dnsbootstrap import dns_bootstrap_host_port_q
 from pycoinnet.headerpipeline import improve_headers
-from pycoinnet.msg.PeerAddress import PeerAddress
 from pycoinnet.networks import MAINNET, TESTNET
 
 from pycoinnet.Blockfetcher import Blockfetcher
@@ -55,8 +55,8 @@ def save_bcv(path, bcv):
 
 VERSION_MSG = dict(
     version=70001, subversion=b"/Notoshi/", services=1, timestamp=1392760610,
-    remote_address=PeerAddress(1, "127.0.0.2", 6111),
-    local_address=PeerAddress(1, "127.0.0.1", 6111),
+    remote_address=PeerAddress(1, bytes([127, 0, 0, 2]), 6111),
+    local_address=PeerAddress(1, bytes([127, 0, 0, 1]), 6111),
     nonce=3412075413544046060,
     last_block_index=10000
 )
@@ -146,18 +146,18 @@ def main():
     block_fetcher = Blockfetcher()
     loop = asyncio.get_event_loop()
     bcv = get_current_view(path)
-    network = TESTNET
+    network = MAINNET
 
     update_q = asyncio.Queue()
     block_future_q = asyncio.Queue(maxsize=1000)
     handle_headers_q_task = loop.create_task(handle_headers_q(block_fetcher, update_q, block_future_q))
     handle_update_q_task = loop.create_task(handle_update_q(bcv, path, block_future_q, max_batch_size=128))
 
-    peers = []
+    peers = set()
 
     def add_peer(peer):
         block_fetcher.add_peer(peer)
-        peers.append(peer)
+        peers.add(peer)
 
     loop.run_until_complete(update_headers_pipeline(
         network, bcv, count=3, update_q=update_q, peer_created_callback=add_peer))
