@@ -53,3 +53,10 @@ VERSION_MSG = dict(
     nonce=3412075413544046060,
     last_block_index=10000
 )
+
+
+def install_pong_manager(peer):
+    def handle_msg(name, data):
+        if name == 'ping':
+            peer.send_msg("pong", nonce=data["nonce"])
+    peer.add_msg_handler(handle_msg)

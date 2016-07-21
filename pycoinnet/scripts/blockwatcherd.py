@@ -20,7 +20,7 @@ from pycoinnet.Blockfetcher import Blockfetcher
 from pycoinnet.Peer import Peer
 
 from pycoinnet.scripts.common import (
-    init_logging, storage_base_path, get_current_view, save_bcv, VERSION_MSG
+    init_logging, storage_base_path, get_current_view, save_bcv, VERSION_MSG, install_pong_manager
 )
 
 
@@ -38,6 +38,7 @@ def update_headers(network, q, bcv, update_q, peer_created_callback):
     peer = Peer(reader, writer, network.magic_header, network.parse_from_data, network.pack_from_data)
     yield from peer.perform_handshake(**VERSION_MSG)
     peer_created_callback(peer)
+    install_pong_manager(peer)
     peer.start_dispatcher()
     yield from improve_headers(peer, bcv, update_q)
     bcv.winnow()
@@ -122,7 +123,7 @@ def main():
         peers.add(peer)
 
     loop.run_until_complete(update_headers_pipeline(
-        network, bcv, count=2, update_q=update_q, peer_created_callback=add_peer))
+        network, bcv, count=3, update_q=update_q, peer_created_callback=add_peer))
 
     loop.run_until_complete(handle_headers_q_task)
     loop.run_until_complete(handle_update_q_task)
