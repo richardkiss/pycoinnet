@@ -8,56 +8,18 @@ import argparse
 import asyncio
 import logging
 import os.path
+import sys
 
-from pycoin.message.PeerAddress import PeerAddress
 from pycoin.serialize import b2h_rev
 
 from pycoinnet.dnsbootstrap import dns_bootstrap_host_port_q
 from pycoinnet.headerpipeline import improve_headers
 from pycoinnet.networks import MAINNET, TESTNET
 
-from pycoinnet.BlockChainView import BlockChainView
 from pycoinnet.Peer import Peer
 
-
-LOG_FORMAT = ('%(asctime)s [%(process)d] [%(levelname)s] '
-              '%(filename)s:%(lineno)d %(message)s')
-
-asyncio.tasks._DEBUG = True
-logging.basicConfig(level=logging.DEBUG, format=LOG_FORMAT)
-logging.getLogger("asyncio").setLevel(logging.INFO)
-
-
-def storage_base_path():
-    p = os.path.expanduser("~/.pycoinnet/default/")
-    if not os.path.exists(p):
-        os.makedirs(p)
-    return p
-
-
-def get_current_view(path):
-    try:
-        with open(path) as f:
-            return BlockChainView.from_json(f.read())
-    except FileNotFoundError:
-        pass
-    return BlockChainView()
-
-
-def save_bcv(path, bcv):
-    json = bcv.as_json(sort_keys=True, indent=2)
-    tmp = "%s.tmp" % path
-    with open(tmp, "w") as f:
-        f.write(json)
-    os.rename(tmp, path)
-
-
-VERSION_MSG = dict(
-    version=70001, subversion=b"/Notoshi/", services=1, timestamp=1392760610,
-    remote_address=PeerAddress(1, bytes([127, 0, 0, 2]), 6111),
-    local_address=PeerAddress(1, bytes([127, 0, 0, 1]), 6111),
-    nonce=3412075413544046060,
-    last_block_index=10000
+from pycoinnet.scripts.common import (
+    init_logging, storage_base_path, get_current_view, save_bcv, VERSION_MSG
 )
 
 
@@ -104,6 +66,7 @@ def update_chain_state(network, bcv, update_q, peer_set, count=3):
 
 
 def main():
+    init_logging()
     parser = argparse.ArgumentParser(description="Update chain state and print summary.")
     parser.add_argument('-p', "--path", help='The path to the wallet files.')
 
@@ -113,16 +76,18 @@ def main():
     loop = asyncio.get_event_loop()
     update_q = asyncio.Queue()
     bcv = get_current_view(path)
+    network = MAINNET
     peers = set()
+
     muq_task = loop.create_task(monitor_update_q(path, bcv, update_q))
-    loop.run_until_complete(update_chain_state(MAINNET, bcv, update_q, peers))
-    last_index, last_block_hash, total_work = bcv.last_block_tuple()
+    loop.run_until_complete(update_chain_state(network, bcv, update_q, peers))
     for peer in peers:
         peer.close()
     for peer in peers:
         loop.run_until_complete(peer.wait_for_cleanup())
     update_q.put_nowait(None)
     loop.run_until_complete(muq_task)
+    last_index, last_block_hash, total_work = bcv.last_block_tuple()
     print("last block index %d, hash %s" % (last_index, b2h_rev(last_block_hash)))
 
 

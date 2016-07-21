@@ -8,8 +8,8 @@ import argparse
 import asyncio
 import logging
 import os.path
+import sys
 
-from pycoin.message.PeerAddress import PeerAddress
 from pycoin.serialize import b2h_rev
 
 from pycoinnet.dnsbootstrap import dns_bootstrap_host_port_q
@@ -17,48 +17,10 @@ from pycoinnet.headerpipeline import improve_headers
 from pycoinnet.networks import MAINNET, TESTNET
 
 from pycoinnet.Blockfetcher import Blockfetcher
-from pycoinnet.BlockChainView import BlockChainView
 from pycoinnet.Peer import Peer
 
-
-LOG_FORMAT = ('%(asctime)s [%(process)d] [%(levelname)s] '
-              '%(filename)s:%(lineno)d %(message)s')
-
-asyncio.tasks._DEBUG = True
-logging.basicConfig(level=logging.DEBUG, format=LOG_FORMAT)
-logging.getLogger("asyncio").setLevel(logging.INFO)
-
-
-def storage_base_path():
-    p = os.path.expanduser("~/.pycoinnet/default/")
-    if not os.path.exists(p):
-        os.makedirs(p)
-    return p
-
-
-def get_current_view(path):
-    try:
-        with open(path) as f:
-            return BlockChainView.from_json(f.read())
-    except FileNotFoundError:
-        pass
-    return BlockChainView()
-
-
-def save_bcv(path, bcv):
-    json = bcv.as_json(sort_keys=True, indent=2)
-    tmp = "%s.tmp" % path
-    with open(tmp, "w") as f:
-        f.write(json)
-    os.rename(tmp, path)
-
-
-VERSION_MSG = dict(
-    version=70001, subversion=b"/Notoshi/", services=1, timestamp=1392760610,
-    remote_address=PeerAddress(1, bytes([127, 0, 0, 2]), 6111),
-    local_address=PeerAddress(1, bytes([127, 0, 0, 1]), 6111),
-    nonce=3412075413544046060,
-    last_block_index=10000
+from pycoinnet.scripts.common import (
+    init_logging, storage_base_path, get_current_view, save_bcv, VERSION_MSG
 )
 
 
@@ -137,31 +99,30 @@ def flush_block_update(bcv, path, block_update):
 
 
 def main():
+    init_logging()
     parser = argparse.ArgumentParser(description="Update chain state and print summary.")
     parser.add_argument('-p', "--path", help='The path to the wallet files.')
 
     args = parser.parse_args()
-    path = os.path.join(args.path or storage_base_path(), "chainstate.json")
+    path = os.path.join(args.path or storage_base_path(), "blockwatcherd.json")
 
-    block_fetcher = Blockfetcher()
     loop = asyncio.get_event_loop()
+    update_q = asyncio.Queue()
     bcv = get_current_view(path)
     network = MAINNET
+    peers = set()
 
-    update_q = asyncio.Queue()
+    block_fetcher = Blockfetcher()
     block_future_q = asyncio.Queue(maxsize=1000)
     handle_headers_q_task = loop.create_task(handle_headers_q(block_fetcher, update_q, block_future_q))
     handle_update_q_task = loop.create_task(handle_update_q(bcv, path, block_future_q, max_batch_size=128))
-
-    peers = set()
 
     def add_peer(peer):
         block_fetcher.add_peer(peer)
         peers.add(peer)
 
     loop.run_until_complete(update_headers_pipeline(
-        network, bcv, count=3, update_q=update_q, peer_created_callback=add_peer))
-    last_index, last_block_hash, total_work = bcv.last_block_tuple()
+        network, bcv, count=2, update_q=update_q, peer_created_callback=add_peer))
 
     loop.run_until_complete(handle_headers_q_task)
     loop.run_until_complete(handle_update_q_task)
@@ -170,6 +131,7 @@ def main():
         peer.close()
     for peer in peers:
         loop.run_until_complete(peer.wait_for_cleanup())
+    last_index, last_block_hash, total_work = bcv.last_block_tuple()
     print("last block index %d, hash %s" % (last_index, b2h_rev(last_block_hash)))
 
 
