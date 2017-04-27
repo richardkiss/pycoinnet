@@ -30,7 +30,7 @@ $ pip install -r requirements.txt
 $ pip install .
 ```
 
-Nothing here really pycoinnet-specific except the dependancy on pycoin.
+Nothing here really pycoinnet-specific except the dependency on pycoin.
 
 
 Try the SPV Demo
