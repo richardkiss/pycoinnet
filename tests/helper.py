@@ -1,11 +1,12 @@
 import hashlib
 
 from pycoin import ecdsa
-from pycoin.block import Block, BlockHeader
+from pycoin.block import Block
 from pycoin.encoding import public_pair_to_sec
 from pycoin.key.Key import Key
+from pycoin.merkle import merkle
 from pycoin.tx.Tx import Tx, TxIn, TxOut
-from pycoin.tx.TxOut import standard_tx_out_script
+from pycoin.ui import standard_tx_out_script
 
 GENESIS_TIME = 1390000000
 DEFAULT_DIFFICULTY = 3000000
@@ -16,7 +17,7 @@ def make_hash(i, s=b''):
     return hashlib.sha256(("%d_%s" % (i, s)).encode()).digest()
 
 
-def make_tx(i):
+def make_tx(network, i):
     key = Key(12345 * (i+29))
     script = standard_tx_out_script(key.address())
     txs_in = [TxIn(make_hash(i*10000+idx), (i+idx) % 2) for idx in range(3)]
@@ -40,14 +41,6 @@ def make_headers(count, header=None):
     return headers
 
 
-def make_block(index):
-    s = index*30000
-    txs = [make_tx(i) for i in range(s, s+8)]
-    block = Block(version=1, previous_block_hash=b'\0'*32, merkle_root=b'\0'*32,
-                  timestamp=GENESIS_TIME+index, difficulty=s, nonce=s, txs=txs)
-    return block
-
-
 def coinbase_tx(secret_exponent):
     public_pair = ecdsa.public_pair_for_secret_exponent(
         ecdsa.secp256k1.generator_secp256k1, secret_exponent)
@@ -57,15 +50,17 @@ def coinbase_tx(secret_exponent):
 COINBASE_TX = coinbase_tx(1)
 
 
-def make_blocks(count, nonce_base=30000, previous_block_hash=HASH_INITIAL_BLOCK):
+def make_blocks(network, count, nonce_base=30000, previous_block_hash=HASH_INITIAL_BLOCK):
     blocks = []
     for i in range(count):
         s = i * nonce_base
         txs = [COINBASE_TX]  # + [make_tx(i) for i in range(s, s+8)]
         nonce = s
         while True:
-            block = Block(version=1, previous_block_hash=previous_block_hash, merkle_root=b'\0'*32,
-                          timestamp=GENESIS_TIME+i*600, difficulty=i, nonce=nonce, txs=txs)
+            merkle_root = merkle([tx.hash() for tx in txs])
+            block = Block(version=1, previous_block_hash=previous_block_hash, merkle_root=merkle_root,
+                          timestamp=GENESIS_TIME+i*600, difficulty=i, nonce=nonce)
+            block.set_txs(txs)
             if block.hash()[-1] == i & 0xff:
                 break
             nonce += 1

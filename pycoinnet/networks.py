@@ -1,10 +1,8 @@
-#!/usr/bin/env python
-
 import binascii
 
 from collections import namedtuple
 
-from pycoin.block import Block, BlockHeader
+from pycoin.block import Block
 from pycoin.message.make_parser_and_packer import (
     make_parser_and_packer, standard_messages,
     standard_message_post_unpacks, standard_streamer, standard_parsing_functions
@@ -19,7 +17,7 @@ Network = namedtuple(
     )
 )
 
-streamer = standard_streamer(standard_parsing_functions(Block, BlockHeader, Tx))
+streamer = standard_streamer(standard_parsing_functions(Block, Tx))
 btc_parser, btc_packer = make_parser_and_packer(
     streamer, standard_messages(), standard_message_post_unpacks(streamer))
 

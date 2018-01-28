@@ -1,16 +1,22 @@
 import asyncio
 import unittest
 
+from pycoin.message.InvItem import InvItem
+from pycoin.message.PeerAddress import PeerAddress
+
 from pycoinnet.Peer import Peer
-from pycoinnet.msg.InvItem import InvItem
-from pycoinnet.msg.PeerAddress import PeerAddress
 from pycoinnet.networks import MAINNET
 
-from tests.timeless_eventloop import create_timeless_streams_pair, use_timeless_eventloop
+from tests.pipes import create_direct_streams_pair
+from tests.timeless_eventloop import TimelessEventLoop
 
 
 # from peer.helper import (PeerTransport, MAGIC_HEADER, VERSION_MSG_BIN,
 # VERSION_MSG, VERSION_MSG, VERSION_MSG_2, VERACK_MSG_BIN)
+
+
+def ip_2_bin(ip):
+    return bytes(int(x) for x in ip.split("."))
 
 
 def run(f):
@@ -19,10 +25,13 @@ def run(f):
 
 class PeerTest(unittest.TestCase):
     def setUp(self):
-        use_timeless_eventloop()
+        asyncio.set_event_loop(TimelessEventLoop())
+
+    def tearDown(self):
+        asyncio.new_event_loop()
 
     def create_peer_pair(self):
-        (r1, w1), (r2, w2) = create_timeless_streams_pair()
+        (r1, w1), (r2, w2) = create_direct_streams_pair()
         p1 = Peer(r1, w1, MAINNET.magic_header, MAINNET.parse_from_data, MAINNET.pack_from_data)
         p2 = Peer(r2, w2, MAINNET.magic_header, MAINNET.parse_from_data, MAINNET.pack_from_data)
         return p1, p2
@@ -39,8 +48,8 @@ class PeerTest(unittest.TestCase):
         p1, p2 = self.create_peer_pair()
         VERSION_MSG = dict(
                 version=70001, subversion=b"/Notoshi/", services=1, timestamp=1392760610,
-                remote_address=PeerAddress(1, "127.0.0.2", 6111),
-                local_address=PeerAddress(1, "127.0.0.1", 6111),
+                remote_address=PeerAddress(1, ip_2_bin("127.0.0.2"), 6111),
+                local_address=PeerAddress(1, ip_2_bin("127.0.0.1"), 6111),
                 nonce=3412075413544046060,
                 last_block_index=0
             )

@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-
 """
 This tool gets all headers quickly and prints summary of chain state.
 """

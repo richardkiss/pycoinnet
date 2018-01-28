@@ -45,3 +45,59 @@ def create_pipe_streams_pair():
     r2, w2 = yield from server_side
     server.close()
     return (r1, w1), (r2, w2)
+
+
+class DirectTransport(asyncio.Transport):
+
+    DEFAULT_LATENCY = 2.0
+
+    def __init__(self, remote_protocol, latency=None, loop=None):
+        self._remote_protocol = remote_protocol
+        self._loop = loop or asyncio.get_event_loop()
+        self._latency = latency if latency is not None else self.DEFAULT_LATENCY
+        self._is_closing = False
+        self._extra = {}
+
+    def write(self, data):
+        if self._is_closing:
+            return
+        self._loop.call_later(self._latency, self._remote_protocol.data_received, data)
+
+    def close(self):
+        def later():
+            try:
+                self._remote_protocol.eof_received()
+            except Exception:
+                pass
+            self._remote_protocol.connection_lost(None)
+        self._loop.call_later(self._latency, later)
+        self._is_closing = True
+
+    def is_closing(self):
+        return self._is_closing
+
+
+def create_direct_transport_pair(protocol_factor_1, protocol_factor_2=None, latency=None, loop=None):
+    protocol_factor_2 = protocol_factor_2 or protocol_factor_1
+    p1 = protocol_factor_1()
+    p2 = protocol_factor_2()
+    t1 = DirectTransport(p2, latency=latency, loop=loop)
+    t2 = DirectTransport(p1, latency=latency, loop=loop)
+    p1.connection_made(t1)
+    p2.connection_made(t2)
+    return (t1, p1), (t2, p2)
+
+
+def create_direct_streams_pair(loop=None, latency=None):
+    loop = loop or asyncio.get_event_loop()
+    r1 = asyncio.StreamReader(loop=loop)
+    r2 = asyncio.StreamReader(loop=loop)
+
+    def protocol_f(reader):
+        def f():
+            return asyncio.StreamReaderProtocol(reader, loop=loop)
+        return f
+    (t1, p1), (t2, p2) = create_direct_transport_pair(protocol_f(r1), protocol_f(r2))
+    w1 = asyncio.StreamWriter(t1, p1, r1, loop)
+    w2 = asyncio.StreamWriter(t2, p2, r2, loop)
+    return (r1, w1), (r2, w2)

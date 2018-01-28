@@ -2,16 +2,15 @@ import asyncio
 import time
 import unittest
 
-from tests.timeless_eventloop import (
-    use_timeless_eventloop, create_timeless_transport_pair, create_timeless_streams_pair
-)
+from tests.pipes import create_direct_streams_pair, create_direct_transport_pair
+from tests.timeless_eventloop import TimelessEventLoop
 
 
 def run(f):
     return asyncio.get_event_loop().run_until_complete(f)
 
 
-class TestProtocol(asyncio.Protocol):
+class ATestProtocol(asyncio.Protocol):
     def __init__(self):
         self._loop = asyncio.get_event_loop()
         self.connection_made_time = None
@@ -28,7 +27,10 @@ class TestProtocol(asyncio.Protocol):
 
 class TheTest(unittest.TestCase):
     def setUp(self):
-        use_timeless_eventloop()
+        asyncio.set_event_loop(TimelessEventLoop())
+
+    def tearDown(self):
+        asyncio.new_event_loop()
 
     def test_loop(self):
         loop = asyncio.get_event_loop()
@@ -42,7 +44,7 @@ class TheTest(unittest.TestCase):
 
     def test_timeless_transport(self):
         loop = asyncio.get_event_loop()
-        (t1, p1), (t2, p2) = create_timeless_transport_pair(TestProtocol)
+        (t1, p1), (t2, p2) = create_direct_transport_pair(ATestProtocol)
         D1 = b"foo" * 300
         D2 = b"bar" * 100
         t1.write(D1)
@@ -60,7 +62,7 @@ class TheTest(unittest.TestCase):
         assert d2 == D1
 
     def test_timeless_streams(self):
-        (r1, w1), (r2, w2) = create_timeless_streams_pair()
+        (r1, w1), (r2, w2) = create_direct_streams_pair()
         w1.write(b"fooPlease kill me\nhello\n")
         w2.write(b"bar")
         a1 = time.time()
