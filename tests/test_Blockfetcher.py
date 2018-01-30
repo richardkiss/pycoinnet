@@ -33,7 +33,7 @@ class BlockfetcherTest(unittest.TestCase):
         asyncio.set_event_loop(self.loop)
 
     def tearDown(self):
-        asyncio.new_event_loop()
+        asyncio.set_event_loop(asyncio.new_event_loop())
 
     def _test_with_delays(self, d13, d23):
         peer1_3, peer3_1 = create_pair(self.loop)

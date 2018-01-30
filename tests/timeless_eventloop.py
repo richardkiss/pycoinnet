@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import time
 
 from asyncio.unix_events import _UnixSelectorEventLoop
@@ -18,7 +19,9 @@ class TimelessEventLoop(_UnixSelectorEventLoop):
         now = self.time()
         when = self._scheduled[0]._when
         if when > now:
-            self._fake_time_offset += when - now
+            skip = when - now
+            logging.debug("skipping %s seconds", skip)
+            self._fake_time_offset += skip
     
     def _run_once(self):
         """Run one full iteration of the event loop.

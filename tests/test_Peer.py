@@ -28,7 +28,7 @@ class PeerTest(unittest.TestCase):
         asyncio.set_event_loop(TimelessEventLoop())
 
     def tearDown(self):
-        asyncio.new_event_loop()
+        asyncio.set_event_loop(asyncio.new_event_loop())
 
     def create_peer_pair(self):
         (r1, w1), (r2, w2) = create_direct_streams_pair()

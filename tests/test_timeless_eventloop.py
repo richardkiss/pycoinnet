@@ -30,7 +30,7 @@ class TheTest(unittest.TestCase):
         asyncio.set_event_loop(TimelessEventLoop())
 
     def tearDown(self):
-        asyncio.new_event_loop()
+        asyncio.set_event_loop(asyncio.new_event_loop())
 
     def test_loop(self):
         loop = asyncio.get_event_loop()
