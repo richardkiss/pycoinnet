@@ -74,7 +74,7 @@ def do_updates(bcv, network, nonce, last_block_index, bloom_filter, early_timest
             nonce=nonce,
             last_block_index=last_block_index
         )
-    
+
     reader, writer = yield from asyncio.open_connection(host=host, port=port)
     logging.info("connecting to %s:%d", host, port)
     peer = Peer(reader, writer, network.magic_header, network.parse_from_data, network.pack_from_data)

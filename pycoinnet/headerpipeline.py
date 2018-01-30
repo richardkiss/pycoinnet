@@ -59,4 +59,3 @@ def improve_headers(peer, bcv, update_q, hash_stop=b'\0'*32):
             assert the_tuple[0] == idx
             hashes.append(the_tuple[1])
         update_q.put_nowait((block_number, hashes))
-

@@ -22,7 +22,7 @@ class TimelessEventLoop(_UnixSelectorEventLoop):
             skip = when - now
             logging.debug("skipping %s seconds", skip)
             self._fake_time_offset += skip
-    
+
     def _run_once(self):
         """Run one full iteration of the event loop.
 

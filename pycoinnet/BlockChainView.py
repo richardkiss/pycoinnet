@@ -96,12 +96,12 @@ class BlockChainView:
         """
         if len(self.node_tuples) == 0:
             return [HASH_INITIAL_BLOCK]
-        l = []
+        hashes = []
         for index in self.key_index_generator():
             the_hash = self.tuple_for_index(index)[1]
-            if len(l) == 0 or the_hash != l[-1]:
-                l.append(the_hash)
-        return l
+            if len(hashes) == 0 or the_hash != hashes[-1]:
+                hashes.append(the_hash)
+        return hashes
 
     @staticmethod
     def _halsies_indices(block_index):

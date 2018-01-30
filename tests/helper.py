@@ -35,8 +35,8 @@ def make_headers(count, header=None):
     headers = []
     for i in range(count):
         headers.append(
-            BlockHeader(version=1, previous_block_hash=last_hash, merkle_root=make_hash(i, tweak),
-                        timestamp=GENESIS_TIME+i*600, difficulty=DEFAULT_DIFFICULTY, nonce=i*137))
+            Block(version=1, previous_block_hash=last_hash, merkle_root=make_hash(i, tweak),
+                  timestamp=GENESIS_TIME+i*600, difficulty=DEFAULT_DIFFICULTY, nonce=i*137))
         last_hash = headers[-1].hash()
     return headers
 

@@ -3,12 +3,12 @@ import binascii
 import logging
 import struct
 import time
-import weakref
 
 from pycoin import encoding
 
 from pycoinnet.message import parse_from_data, pack_from_data
 from pycoinnet.util.Multiplexer import Multiplexer
+
 
 class BitcoinProtocolError(Exception):
     pass
