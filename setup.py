@@ -11,7 +11,7 @@ setup(
     version=version,
     packages=[
         "pycoinnet",
-        "pycoinnet.scripts",
+        "pycoinnet.cmds",
     ],
     entry_points={'console_scripts': [
         'blockwatcher = pycoinnet.examples.blockwatcher:main',
