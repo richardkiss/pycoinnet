@@ -28,6 +28,7 @@ from pycoinnet.BloomFilter import BloomFilter, filter_size_required, hash_functi
 from pycoinnet.BlockChainView import BlockChainView, HASH_INITIAL_BLOCK
 from pycoinnet.msg.InvItem import InvItem, ITEM_TYPE_MERKLEBLOCK
 from pycoinnet.msg.PeerAddress import PeerAddress
+from pycoinnet.version import version_data_for_peer
 
 
 def storage_base_path():
@@ -67,18 +68,11 @@ def do_get_headers(peer, block_locator_hashes, hash_stop=b'\0'*32):
 
 @asyncio.coroutine
 def do_updates(bcv, network, nonce, last_block_index, bloom_filter, early_timestamp, host, port):
-    VERSION_MSG = dict(
-            version=70001, subversion=b"/Notoshi/", services=1, timestamp=int(time.time()),
-            remote_address=PeerAddress(1, host, port),
-            local_address=PeerAddress(1, "127.0.0.1", 6111),
-            nonce=nonce,
-            last_block_index=last_block_index
-        )
-
     reader, writer = yield from asyncio.open_connection(host=host, port=port)
     logging.info("connecting to %s:%d", host, port)
     peer = Peer(reader, writer, network.magic_header, network.parse_from_data, network.pack_from_data)
-    remote_handshake = yield from peer.perform_handshake(**VERSION_MSG)
+    version_data = version_data_for_peer(peer)
+    remote_handshake = yield from peer.perform_handshake(**version_data)
     assert remote_handshake is not None
     peer.start_dispatcher()
 

@@ -81,9 +81,9 @@ class Peer:
         return message_name, message_data
 
     @asyncio.coroutine
-    def perform_handshake(self, **VERSION_MSG):
+    def perform_handshake(self, **version_msg):
         # "version"
-        self.send_msg("version", **VERSION_MSG)
+        self.send_msg("version", **version_msg)
         msg, version_data = yield from self.next_message()
         self.handle_msg(msg, version_data)
         assert msg == 'version'

@@ -11,10 +11,6 @@ from tests.pipes import create_direct_streams_pair
 from tests.timeless_eventloop import TimelessEventLoop
 
 
-# from peer.helper import (PeerTransport, MAGIC_HEADER, VERSION_MSG_BIN,
-# VERSION_MSG, VERSION_MSG, VERSION_MSG_2, VERACK_MSG_BIN)
-
-
 def ip_2_bin(ip):
     return bytes(int(x) for x in ip.split("."))
 

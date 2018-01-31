@@ -18,8 +18,9 @@ from pycoinnet.networks import MAINNET
 from pycoinnet.Peer import Peer
 
 from pycoinnet.cmds.common import (
-    init_logging, storage_base_path, get_current_view, save_bcv, VERSION_MSG
+    init_logging, storage_base_path, get_current_view, save_bcv
 )
+from pycoinnet.version import version_data_for_peer
 
 
 @asyncio.coroutine
@@ -27,7 +28,8 @@ def connect_peer(network, host, port):
     reader, writer = yield from asyncio.open_connection(host=host, port=port)
     logging.info("connecting to %s:%d", host, port)
     peer = Peer(reader, writer, network.magic_header, network.parse_from_data, network.pack_from_data)
-    yield from peer.perform_handshake(**VERSION_MSG)
+    version_data = version_data_for_peer(peer)
+    yield from peer.perform_handshake(**version_data)
     peer.start_dispatcher()
     return peer
 

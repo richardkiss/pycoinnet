@@ -19,8 +19,9 @@ from pycoinnet.Blockfetcher import Blockfetcher
 from pycoinnet.Peer import Peer
 
 from pycoinnet.scripts.common import (
-    init_logging, storage_base_path, get_current_view, save_bcv, VERSION_MSG, install_pong_manager
+    init_logging, storage_base_path, get_current_view, save_bcv, install_pong_manager
 )
+from pycoinnet.version import version_data_for_peer
 
 
 @asyncio.coroutine
@@ -35,7 +36,8 @@ def update_headers(network, q, bcv, update_q, peer_created_callback):
         break
 
     peer = Peer(reader, writer, network.magic_header, network.parse_from_data, network.pack_from_data)
-    yield from peer.perform_handshake(**VERSION_MSG)
+    version_data = version_data_for_peer(peer)
+    yield from peer.perform_handshake(**version_data)
     peer_created_callback(peer)
     install_pong_manager(peer)
     peer.start_dispatcher()
