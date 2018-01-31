@@ -18,7 +18,7 @@ from pycoinnet.networks import MAINNET
 from pycoinnet.Blockfetcher import Blockfetcher
 from pycoinnet.Peer import Peer
 
-from pycoinnet.scripts.common import (
+from .common import (
     init_logging, storage_base_path, get_current_view, save_bcv, install_pong_manager
 )
 from pycoinnet.version import version_data_for_peer

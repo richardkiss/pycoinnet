@@ -15,33 +15,21 @@ from pycoinnet.dnsbootstrap import dns_bootstrap_host_port_q
 from pycoinnet.headerpipeline import improve_headers
 from pycoinnet.networks import MAINNET
 
-from pycoinnet.Peer import Peer
-
 from pycoinnet.cmds.common import (
-    init_logging, storage_base_path, get_current_view, save_bcv
+    init_logging, connect_peer, storage_base_path, get_current_view, save_bcv
 )
-from pycoinnet.version import version_data_for_peer
 
 
-@asyncio.coroutine
-def connect_peer(network, host, port):
-    reader, writer = yield from asyncio.open_connection(host=host, port=port)
-    logging.info("connecting to %s:%d", host, port)
-    peer = Peer(reader, writer, network.magic_header, network.parse_from_data, network.pack_from_data)
-    version_data = version_data_for_peer(peer)
-    yield from peer.perform_handshake(**version_data)
-    peer.start_dispatcher()
-    return peer
-
-
-@asyncio.coroutine
-def monitor_update_q(path, bcv, update_q):
+async def monitor_update_q(network, path, bcv, count):
+    update_q = asyncio.Queue()
+    ucs = asyncio.get_event_loop().create_task(update_chain_state(network, bcv, update_q, count))
     while True:
-        v = yield from update_q.get()
+        v = await update_q.get()
         if v is None:
             break
         bcv.winnow()
         save_bcv(path, bcv)
+    await ucs
 
 
 @asyncio.coroutine
@@ -51,19 +39,24 @@ def update_current_view(network, host, port, bcv, peer_set, update_q):
     yield from improve_headers(peer, bcv, update_q)
 
 
-@asyncio.coroutine
-def update_chain_state(network, bcv, update_q, peer_set, count=3):
+async def update_chain_state(network, bcv, update_q, count=3):
+    peers = set()
     futures = []
     q = dns_bootstrap_host_port_q(network)
     for _ in range(count):
-        peer_addr = yield from q.get()
+        peer_addr = await q.get()
         if peer_addr is None:
             break
         host, port = peer_addr
-        futures.append(update_current_view(network, host, port, bcv, peer_set, update_q))
+        futures.append(update_current_view(network, host, port, bcv, peers, update_q))
         if len(futures) >= count:
             break
-    yield from asyncio.wait(futures)
+    await asyncio.wait(futures)
+    update_q.put_nowait(None)
+    for peer in peers:
+        peer.close()
+    for peer in peers:
+        await peer.wait_for_cleanup()
 
 
 def main():
@@ -74,20 +67,13 @@ def main():
     args = parser.parse_args()
     path = os.path.join(args.path or storage_base_path(), "chainstate.json")
 
-    loop = asyncio.get_event_loop()
-    update_q = asyncio.Queue()
     bcv = get_current_view(path)
-    network = MAINNET
-    peers = set()
+    last_index, last_block_hash, total_work = bcv.last_block_tuple()
+    print("last block index %d, hash %s" % (last_index, b2h_rev(last_block_hash)))
 
-    muq_task = loop.create_task(monitor_update_q(path, bcv, update_q))
-    loop.run_until_complete(update_chain_state(network, bcv, update_q, peers))
-    for peer in peers:
-        peer.close()
-    for peer in peers:
-        loop.run_until_complete(peer.wait_for_cleanup())
-    update_q.put_nowait(None)
-    loop.run_until_complete(muq_task)
+    network = MAINNET
+
+    r = asyncio.get_event_loop().run_until_complete(monitor_update_q(network, path, bcv, count=3))
     last_index, last_block_hash, total_work = bcv.last_block_tuple()
     print("last block index %d, hash %s" % (last_index, b2h_rev(last_block_hash)))
 

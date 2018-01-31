@@ -6,9 +6,9 @@ import asyncio
 import logging
 import os.path
 
-from pycoin.message.PeerAddress import PeerAddress
-
 from pycoinnet.BlockChainView import BlockChainView
+from pycoinnet.Peer import Peer
+from pycoinnet.version import version_data_for_peer
 
 
 def init_logging():
@@ -25,6 +25,16 @@ def storage_base_path():
     if not os.path.exists(p):
         os.makedirs(p)
     return p
+
+
+async def connect_peer(network, host, port):
+    reader, writer = await asyncio.open_connection(host=host, port=port)
+    logging.info("connecting to %s:%d", host, port)
+    peer = Peer(reader, writer, network.magic_header, network.parse_from_data, network.pack_from_data)
+    version_data = version_data_for_peer(peer)
+    await peer.perform_handshake(**version_data)
+    peer.start_dispatcher()
+    return peer
 
 
 def get_current_view(path):
