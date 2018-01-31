@@ -32,6 +32,9 @@ class BlockChainView:
         """
         return json.dumps([[t[0], b2h_rev(t[1]), t[2]] for t in self.node_tuples], **kwargs)
 
+    def hash_initial_block(self):
+        return self._genesis_tuple[1]
+
     @classmethod
     def from_json(class_, the_json):
         def from_tuple(t):
@@ -67,7 +70,7 @@ class BlockChainView:
         return self.node_tuples[hi-1]
 
     def tuple_for_hash(self, hash):
-        if hash == self._genesis_tuple[1]:
+        if hash == self.hash_initial_block():
             return self._genesis_tuple
         idx = self.hash_to_index.get(hash)
         if idx is not None:
@@ -92,7 +95,7 @@ class BlockChainView:
         Generate locator_hashes value suitable for passing to getheaders message.
         """
         if len(self.node_tuples) == 0:
-            return [self._genesis_tuple[1]]
+            return [self.hash_initial_block()]
         hashes = []
         for index in self.key_index_generator():
             the_hash = self.tuple_for_index(index)[1]
@@ -138,7 +141,7 @@ class BlockChainView:
         """
         tuples = []
         if len(self.node_tuples) == 0:
-            if headers[0].previous_block_hash != self._genesis_tuple[1]:
+            if headers[0].previous_block_hash != self.hash_initial_block():
                 return False
             the_tuple = self._genesis_tuple
         else:

@@ -44,15 +44,6 @@ def save_bcv(path, bcv):
     os.rename(tmp, path)
 
 
-VERSION_MSG = dict(
-    version=70001, subversion=b"/Notoshi/", services=1, timestamp=1392760610,
-    remote_address=PeerAddress(1, bytes([127, 0, 0, 2]), 6111),
-    local_address=PeerAddress(1, bytes([127, 0, 0, 1]), 6111),
-    nonce=3412075413544046060,
-    last_block_index=10000
-)
-
-
 def install_pong_manager(peer):
     def handle_msg(name, data):
         if name == 'ping':

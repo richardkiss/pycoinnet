@@ -17,7 +17,7 @@ from pycoinnet.networks import MAINNET
 
 from pycoinnet.Peer import Peer
 
-from pycoinnet.scripts.common import (
+from pycoinnet.cmds.common import (
     init_logging, storage_base_path, get_current_view, save_bcv, VERSION_MSG
 )
 
