@@ -1,6 +1,6 @@
 import logging
 
-from pycoinnet.util.BlockChainView import BlockChainView
+from pycoinnet.BlockChainView import BlockChainView
 from tests.helper import make_blocks, make_headers
 
 def test1():
@@ -16,7 +16,7 @@ def test1():
 
 
 def test_halfsies():
-    hi = BlockChainView._halsies_indices
+    hi = BlockChainView._halfsies_indices
     assert hi(0) == set([0])
     assert hi(1) == set([0, 1])
     assert hi(2) == set([0, 1, 2])
@@ -76,7 +76,7 @@ def make_bcv(node_count):
 
 
 def test_winnow():
-    hi = BlockChainView._halsies_indices
+    hi = BlockChainView._halfsies_indices
     for size in [100, 500, 720, 1000]:
         bcv = make_bcv(size)
         assert len(bcv.node_tuples) == size
@@ -109,7 +109,7 @@ def test_tuple_for_hash():
             assert the_tuple[0] == idx
             assert the_tuple[1] == the_hash
         bcv.winnow()
-        items = BlockChainView._halsies_indices(size-1)
+        items = BlockChainView._halfsies_indices(size-1)
         for idx, header in enumerate(headers):
             the_hash = header.hash()
             the_tuple = bcv.tuple_for_hash(the_hash)

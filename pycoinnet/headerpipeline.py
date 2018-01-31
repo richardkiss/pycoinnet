@@ -3,8 +3,6 @@ import logging
 
 from pycoin.message.InvItem import InvItem, ITEM_TYPE_BLOCK
 
-from pycoinnet.BlockChainView import HASH_INITIAL_BLOCK
-
 
 @asyncio.coroutine
 def _fetch_missing(peer, header):
@@ -42,7 +40,7 @@ def improve_headers(peer, bcv, update_q, hash_stop=b'\0'*32):
         if len(headers) == 0:
             return
 
-        if block_locator_hashes[-1] == HASH_INITIAL_BLOCK:
+        if block_locator_hashes[-1] == bcv.hash_initial_block():
             # this hack is necessary because the stupid default client
             # does not send the genesis block!
             extra_block = yield from _fetch_missing(peer, headers[0])

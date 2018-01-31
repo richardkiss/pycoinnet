@@ -3,7 +3,6 @@ import logging
 import unittest
 
 from pycoin.message.InvItem import ITEM_TYPE_BLOCK
-from pycoin.networks.registry import network_for_netcode
 
 from tests.helper import make_blocks
 
@@ -25,8 +24,7 @@ def create_pair(loop):
 
 class BlockfetcherTest(unittest.TestCase):
     def setUp(self):
-        self.network = network_for_netcode("BTC")
-        self.BLOCK_LIST = make_blocks(self.network, 128)
+        self.BLOCK_LIST = make_blocks(128)
         self.block_lookup = {b.hash(): b for b in self.BLOCK_LIST}
         self.old_loop = asyncio.get_event_loop()
         self.loop = TimelessEventLoop()

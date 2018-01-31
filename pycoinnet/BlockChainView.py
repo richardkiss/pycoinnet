@@ -3,20 +3,17 @@ import json
 from pycoin.serialize import b2h_rev, h2b_rev
 
 
-HASH_INITIAL_BLOCK = b'\0' * 32
-GENESIS_TUPLE = (-1, HASH_INITIAL_BLOCK, 0)
-
-
 class BlockChainView:
     """
     A headers-view of the block chain. Keeps track of index, hash, work, with
     indices.
     """
-    def __init__(self, node_tuples=[]):
+    def __init__(self, node_tuples=[], hash_initial_block=b'\0' * 32):
         """
         A node_tuple is (index, hash, total_work).
         """
         self._set_tuples(node_tuples)
+        self._genesis_tuple = (-1, hash_initial_block, 0)
 
     def _set_tuples(self, node_tuples):
         self.node_tuples = []
@@ -46,7 +43,7 @@ class BlockChainView:
 
     def last_block_tuple(self):
         if len(self.node_tuples) == 0:
-            return GENESIS_TUPLE
+            return self._genesis_tuple
         return self.node_tuples[-1]
 
     def last_block_index(self):
@@ -60,7 +57,7 @@ class BlockChainView:
         lo = 0
         hi = len(self.node_tuples)
         if hi == 0:
-            return GENESIS_TUPLE
+            return self._genesis_tuple
         while lo < hi:
             idx = int((lo+hi)/2)
             if self.node_tuples[idx][0] > index:
@@ -70,8 +67,8 @@ class BlockChainView:
         return self.node_tuples[hi-1]
 
     def tuple_for_hash(self, hash):
-        if hash == HASH_INITIAL_BLOCK:
-            return GENESIS_TUPLE
+        if hash == self._genesis_tuple[1]:
+            return self._genesis_tuple
         idx = self.hash_to_index.get(hash)
         if idx is not None:
             return self.tuple_for_index(idx)
@@ -95,7 +92,7 @@ class BlockChainView:
         Generate locator_hashes value suitable for passing to getheaders message.
         """
         if len(self.node_tuples) == 0:
-            return [HASH_INITIAL_BLOCK]
+            return [self._genesis_tuple[1]]
         hashes = []
         for index in self.key_index_generator():
             the_hash = self.tuple_for_index(index)[1]
@@ -104,7 +101,7 @@ class BlockChainView:
         return hashes
 
     @staticmethod
-    def _halsies_indices(block_index):
+    def _halfsies_indices(block_index):
         s = set()
         step_size = 1
         count = 2
@@ -121,7 +118,7 @@ class BlockChainView:
         """
         This method thins out the node_tuples using the "halfsies" method.
         """
-        halfsies_indices = self._halsies_indices(self.last_block_index())
+        halfsies_indices = self._halfsies_indices(self.last_block_index())
         old_node_tuples = self.node_tuples
         self._set_tuples(t for t in old_node_tuples if t[0] in halfsies_indices)
 
@@ -141,9 +138,9 @@ class BlockChainView:
         """
         tuples = []
         if len(self.node_tuples) == 0:
-            if headers[0].previous_block_hash != HASH_INITIAL_BLOCK:
+            if headers[0].previous_block_hash != self._genesis_tuple[1]:
                 return False
-            the_tuple = GENESIS_TUPLE
+            the_tuple = self._genesis_tuple
         else:
             the_tuple = self.tuple_for_hash(headers[0].previous_block_hash)
             if the_tuple is None:
