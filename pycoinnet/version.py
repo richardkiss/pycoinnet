@@ -49,17 +49,20 @@ def ip_2_bin(ip):
 
 
 def version_data_for_peer(
-        peer, version=70001, local_ip="127.0.0.1", local_port=6111, last_block_index=0,
-        nonce=None, subversion=b"/pycoinnet/", services=NODE_NONE, timestamp=None, want_relay=False):
+        peer=None, remote_ip=None, remote_port=None, version=70001, local_ip="127.0.0.1", local_port=6111,
+        last_block_index=0, nonce=None, subversion=b"/pycoinnet/", local_services=NODE_NONE,
+        remote_services=NODE_NONE, timestamp=None, relay=False):
     """This function helps to create the handshake "version" message."""
-    remote_ip, remote_port = peer._reader._transport.get_extra_info('peername')[:2]
-    remote_addr = PeerAddress(1, ip_2_bin(remote_ip), remote_port)
-    local_addr = PeerAddress(1, ip_2_bin(local_ip), local_port)
+    if peer:
+        peername = peer._reader._transport.get_extra_info('peername') or ("0.0.0.0", 0)
+        remote_ip, remote_port = peername[:2]
+    remote_addr = PeerAddress(remote_services, ip_2_bin(remote_ip), remote_port)
+    local_addr = PeerAddress(local_services, ip_2_bin(local_ip), local_port)
     nonce = nonce or int.from_bytes(os.urandom(8), byteorder="big")
     timestamp = timestamp or int(time.time())
     d = dict(
-        version=version, subversion=subversion, services=services, timestamp=timestamp,
+        version=version, subversion=subversion, services=local_services, timestamp=timestamp,
         remote_address=remote_addr, local_address=local_addr,
-        nonce=nonce, last_block_index=last_block_index, want_relay=want_relay
+        nonce=nonce, last_block_index=last_block_index, relay=relay
     )
     return d

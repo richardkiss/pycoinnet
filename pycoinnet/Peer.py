@@ -107,7 +107,7 @@ class Peer:
 
     def handle_msg(self, name, data):
         loop = asyncio.get_event_loop()
-        for m in self._handlers.values():
+        for m in list(self._handlers.values()):
             # each method gets its own copy of the data dict
             # to protect from it being changed
             data = dict(data)

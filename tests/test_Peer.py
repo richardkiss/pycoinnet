@@ -2,17 +2,13 @@ import asyncio
 import unittest
 
 from pycoin.message.InvItem import InvItem
-from pycoin.message.PeerAddress import PeerAddress
 
 from pycoinnet.Peer import Peer
 from pycoinnet.networks import MAINNET
+from pycoinnet.version import version_data_for_peer
 
 from tests.pipes import create_direct_streams_pair
 from tests.timeless_eventloop import TimelessEventLoop
-
-
-def ip_2_bin(ip):
-    return bytes(int(x) for x in ip.split("."))
 
 
 def run(f):
@@ -42,17 +38,12 @@ class PeerTest(unittest.TestCase):
 
     def test_Peer_version(self):
         p1, p2 = self.create_peer_pair()
-        VERSION_MSG = dict(
-                version=70001, subversion=b"/Notoshi/", services=1, timestamp=1392760610,
-                remote_address=PeerAddress(1, ip_2_bin("127.0.0.2"), 6111),
-                local_address=PeerAddress(1, ip_2_bin("127.0.0.1"), 6111),
-                nonce=3412075413544046060,
-                last_block_index=0
-            )
-        t1 = p1.send_msg("version", **VERSION_MSG)
+        version_msg = version_data_for_peer(p1)
+        version_msg["relay"] = True
+        t1 = p1.send_msg("version", **version_msg)
         assert t1 is None
         t2 = run(p2.next_message())
-        assert t2 == ("version", VERSION_MSG)
+        assert t2 == ("version", version_msg)
 
     def test_Peer_inv_getdata_notfound(self):
         p1, p2 = self.create_peer_pair()
@@ -117,61 +108,50 @@ class PeerTest(unittest.TestCase):
         with self.assertRaises(EOFError):
             run(p1.next_message())
 
+    def test_Peer_multiplex(self):
+        p1, p2 = self.create_peer_pair()
 
-def ztest_BitcoinPeerProtocol_read():
-    DATA = []
+        def make_sync_msg_handler(peer):
 
-    def write_f(data):
-        DATA.append(data)
+            future = asyncio.get_event_loop().create_future()
+            handler_id = None
 
-    peer = BitcoinPeerProtocol(MAGIC_HEADER)
-    pt = PeerTransport(write_f)
-    peer.connection_made(pt)
+            def handle_msg(name, data):
+                future.set_result((name, data))
+                peer.remove_msg_handler(handler_id)
 
-    next_message = peer.new_get_next_message_f()
+            handler_id = peer.add_msg_handler(handle_msg)
+            return future
 
-    @asyncio.coroutine
-    def async_test():
-        t = []
-        name, data = yield from next_message()
-        t.append((name, data))
-        name, data = yield from next_message()
-        t.append((name, data))
-        return t
+        def make_async_msg_handler(peer):
 
-    peer.data_received(VERSION_MSG_BIN)
-    peer.data_received(VERACK_MSG_BIN)
-    t = asyncio.get_event_loop().run_until_complete(async_test())
-    assert len(t) == 2
-    assert t[0] == ('version', VERSION_MSG)
-    assert t[1] == ('verack', {})
+            future = asyncio.get_event_loop().create_future()
+            handler_id = None
 
+            async def handle_msg(name, data):
+                await asyncio.sleep(1)
+                future.set_result((name, data))
+                peer.remove_msg_handler(handler_id)
 
-def ztest_BitcoinPeerProtocol_multiplex():
-    peer = BitcoinPeerProtocol(MAGIC_HEADER)
-    pt = PeerTransport(None)
-    peer.connection_made(pt)
+            handler_id = peer.add_msg_handler(handle_msg)
+            return future
 
-    next_message_list = [peer.new_get_next_message_f() for i in range(50)]
-
-    COUNT = 0
-
-    @asyncio.coroutine
-    def async_test(next_message):
-        name, data = yield from next_message()
-        assert name == 'version'
-        assert data == VERSION_MSG
-        name, data = yield from next_message()
-        assert name == 'verack'
-        assert data == {}
-        nonlocal COUNT
-        COUNT += 1
-
-    peer.data_received(VERSION_MSG_BIN)
-    peer.data_received(VERACK_MSG_BIN)
-    asyncio.get_event_loop().run_until_complete(
-        asyncio.wait([asyncio.Task(async_test(nm)) for nm in next_message_list]))
-    assert COUNT == 50
+        futures = []
+        for _ in range(10):
+            futures.append(make_sync_msg_handler(p2))
+        for _ in range(10):
+            futures.append(make_async_msg_handler(p2))
+        p1.start_dispatcher()
+        p2.start_dispatcher()
+        p1.send_msg("verack")
+        items = list(asyncio.get_event_loop().run_until_complete(asyncio.wait(futures))[0])
+        items = [item.result() for item in items]
+        for item in items:
+            self.assertEqual(item, ("verack", {}))
+        p2.close()
+        p1.close()
+        asyncio.get_event_loop().run_until_complete(p1.wait_for_cleanup())
+        asyncio.get_event_loop().run_until_complete(p2.wait_for_cleanup())
 
 
 def ztest_BitcoinPeerProtocol():
