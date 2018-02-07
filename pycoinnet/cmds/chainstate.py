@@ -17,41 +17,36 @@ from pycoinnet.networks import MAINNET
 from pycoinnet.MappingQueue import MappingQueue
 
 from pycoinnet.cmds.common import (
-    init_logging, connect_peer, storage_base_path, get_current_view, save_bcv
+    init_logging, peer_connect_pipeline, storage_base_path, get_current_view, save_bcv
 )
 
 
 async def update_chain_state(network, bcv, count=3):
 
+    peer_q = peer_connect_pipeline(network)
+
     update_q = asyncio.Queue()
 
-    dns_q = dns_bootstrap_host_port_q(network)
-
-    async def do_connect_peer(item, q):
-        host, port = item
-        peer = await connect_peer(network, host, port)
-        await q.put((peer, item))
-
-    async def do_improve_headers(pair, q):
-        peer, item = pair
+    async def do_improve_headers(peer, q):
         r = await improve_headers(peer, bcv, update_q)
         peer.close()
         await peer.wait_for_cleanup()
-        await q.put(item)
+        await q.put(peer)
 
     filters = [
-        dict(callback_f=do_connect_peer, input_q=dns_q, worker_count=30),
-        dict(callback_f=do_improve_headers, worker_count=3),
+        dict(callback_f=do_improve_headers, input_q=peer_q, worker_count=count),
     ]
     q = MappingQueue(*filters)
 
     for _ in range(count):
-        v = await q.get()
-        print(v)
+        peer = await q.get()
+        print("finished update from %s" % peer)
+    q.cancel()
+    asyncio.get_event_loop().stop()
 
 
 def main():
-    init_logging()
+    init_logging(debug=False)
     parser = argparse.ArgumentParser(description="Update chain state and print summary.")
     parser.add_argument('-p', "--path", help='The path to the wallet files.')
 

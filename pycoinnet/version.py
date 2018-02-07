@@ -48,6 +48,10 @@ def ip_2_bin(ip):
     return bytes(int(x) for x in ip.split("."))
 
 
+def random_nonce_for_version():
+    return int.from_bytes(os.urandom(8), byteorder="big")
+
+
 def version_data_for_peer(
         peer=None, remote_ip=None, remote_port=None, version=70001, local_ip="127.0.0.1", local_port=6111,
         last_block_index=0, nonce=None, subversion=b"/pycoinnet/", local_services=NODE_NONE,
@@ -58,7 +62,7 @@ def version_data_for_peer(
         remote_ip, remote_port = peername[:2]
     remote_addr = PeerAddress(remote_services, ip_2_bin(remote_ip), remote_port)
     local_addr = PeerAddress(local_services, ip_2_bin(local_ip), local_port)
-    nonce = nonce or int.from_bytes(os.urandom(8), byteorder="big")
+    nonce = nonce or random_nonce_for_version()
     timestamp = timestamp or int(time.time())
     d = dict(
         version=version, subversion=subversion, services=local_services, timestamp=timestamp,
