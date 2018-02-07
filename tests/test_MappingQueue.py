@@ -162,3 +162,35 @@ class MappingQueueTest(unittest.TestCase):
             r1 = sorted(r, key=lambda x: sum(x))
             self.assertEqual(r, r1)
         loop.run_until_complete(go(TEST_CASE, q))
+
+    def test_filter_pipeline(self):
+        loop = asyncio.get_event_loop()
+
+        async def filter(item):
+            return item != 0
+
+        q = MappingQueue(
+            dict(flatten=True),
+            dict(flatten=True),
+            dict(filter_f=filter),
+        )
+
+        TEST_CASE = [
+            (0, 0, 0, 7),
+            (5, 0, 0, 0),
+            (0, 0, 1, 0),
+            (1, 1, 1, 1),
+            (2, 0, 0, 1),
+            (3, 1, 2, 0),
+        ]
+
+        async def go(case, q):
+            await q.put(case)
+            r = []
+            for _ in range(12):
+                p = await q.get()
+                r.append(p)
+            q.cancel()
+            r1 = [7, 5, 1, 1, 1, 1, 1, 2, 1, 3, 1, 2]
+            self.assertEqual(r, r1)
+        loop.run_until_complete(go(TEST_CASE, q))
