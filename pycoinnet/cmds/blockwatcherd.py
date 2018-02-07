@@ -11,7 +11,6 @@ import os.path
 
 from pycoin.serialize import b2h_rev
 
-
 from pycoinnet.headerpipeline import improve_headers
 from pycoinnet.networks import MAINNET
 from pycoinnet.MappingQueue import MappingQueue
@@ -21,64 +20,6 @@ from pycoinnet.Blockfetcher import Blockfetcher
 from .common import (
     init_logging, storage_base_path, get_current_view, save_bcv, install_pong_manager, peer_connect_pipeline
 )
-
-
-async def update_chain_state(network, bcv, update_q, count, add_peer_callback):
-
-    peers = set()
-    peer_q = peer_connect_pipeline(network)
-
-    async def do_improve_headers(peer, q):
-        add_peer_callback(peer)
-        install_pong_manager(peer)
-        peer.start_dispatcher()
-        await improve_headers(peer, bcv, update_q)
-        await q.put(peer)
-
-    filters = [
-        dict(callback_f=do_improve_headers, input_q=peer_q, worker_count=count),
-    ]
-    q = MappingQueue(*filters)
-
-    for _ in range(count):
-        peers.add(await q.get())
-    return peers
-
-
-async def handle_headers_q(block_fetcher, update_q, block_future_q):
-    """
-    This function takes update records out of update_q, unwraps them, then puts them into block_future_q
-    """
-    while 1:
-        v = await update_q.get()
-        if v is None:
-            break
-        first_block_index, block_hashes = v
-        logging.info("got %d new header(s) starting at %d" % (len(block_hashes), first_block_index))
-        block_hash_priority_pair_list = [(bh, first_block_index + _) for _, bh in enumerate(block_hashes)]
-        block_futures = block_fetcher.fetch_blocks(block_hash_priority_pair_list)
-        for _, bf in enumerate(block_futures):
-            await block_future_q.put((first_block_index + _, bf))
-    await block_future_q.put(None)
-
-
-@asyncio.coroutine
-def handle_update_q(bcv, path, block_future_q, max_batch_size):
-    """
-    This function takes block_future_q records and flushes them from time to time.
-    """
-    block_update = []
-    loop = asyncio.get_event_loop()
-    while 1:
-        v = yield from block_future_q.get()
-        if v is None:
-            break
-        block_index, bf = v
-        block = yield from bf
-        block_update.append((block_index, block))
-        if len(block_update) >= max_batch_size:
-            yield from loop.run_in_executor(None, flush_block_update, bcv, path, block_update)
-    yield from loop.run_in_executor(None, flush_block_update, bcv, path, block_update)
 
 
 def flush_block_update(bcv, path, block_update):
@@ -93,24 +34,56 @@ def flush_block_update(bcv, path, block_update):
     block_update[:] = []
 
 
-async def fetch_blocks(bcv, network, path):
+async def fetch_blocks(bcv, network, path, max_batch_size=1000):
     loop = asyncio.get_event_loop()
-    update_q = asyncio.Queue()
+
     peers = set()
 
     block_fetcher = Blockfetcher()
-    block_future_q = asyncio.Queue(maxsize=1000)
-    handle_headers_q_task = loop.create_task(handle_headers_q(block_fetcher, update_q, block_future_q))
-    handle_update_q_task = loop.create_task(handle_update_q(bcv, path, block_future_q, max_batch_size=128))
 
-    def add_peer(peer):
+    peer_q = peer_connect_pipeline(network)
+
+    async def do_improve_headers(peer, q):
         block_fetcher.add_peer(peer)
         peers.add(peer)
+        install_pong_manager(peer)
+        peer.start_dispatcher()
+        await improve_headers(peer, bcv, q)
 
-    peers = await update_chain_state(network, bcv, update_q=update_q, count=3, add_peer_callback=add_peer)
+    async def handle_headers(item, q):
+        if item is None:
+            await q.put(None)
+            return
+        first_block_index, block_hashes = item
+        logging.info("got %d new header(s) starting at %d" % (len(block_hashes), first_block_index))
+        block_hash_priority_pair_list = [(bh, first_block_index + _) for _, bh in enumerate(block_hashes)]
+        block_futures = block_fetcher.fetch_blocks(block_hash_priority_pair_list)
+        for _, bf in enumerate(block_futures):
+            block = await bf
+            await q.put((first_block_index + _, block))
 
-    await handle_headers_q_task
-    await handle_update_q_task
+    filters = [
+        dict(callback_f=do_improve_headers, input_q=peer_q, worker_count=3),
+        dict(callback_f=handle_headers, worker_count=1),
+    ]
+    q = MappingQueue(*filters)
+
+    block_update = []
+    while True:
+        update = await q.get()
+        print(update)
+        if update is None:
+            break
+        block_index, block = update
+        block_update.append((block_index, block))
+        if len(block_update) >= max_batch_size:
+            await loop.run_in_executor(None, flush_block_update, bcv, path, block_update)
+        block_update = []
+
+    await loop.run_in_executor(None, flush_block_update, bcv, path, block_update)
+    block_update = []
+
+    q.cancel()
 
     for peer in peers:
         peer.close()
