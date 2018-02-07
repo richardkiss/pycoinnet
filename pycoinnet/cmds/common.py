@@ -44,8 +44,7 @@ def peer_connect_pipeline(network, tcp_connect_workers=30, handshake_workers=3, 
         reader, writer = rw_tuple
         peer = Peer(reader, writer, network.magic_header, network.parse_from_data, network.pack_from_data)
         version_data = version_data_for_peer(peer)
-        await peer.perform_handshake(**version_data)
-        peer.start_dispatcher()
+        peer.version = await peer.perform_handshake(**version_data)
         await q.put(peer)
 
     filters = [

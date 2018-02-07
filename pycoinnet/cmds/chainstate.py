@@ -28,6 +28,7 @@ async def update_chain_state(network, bcv, count=3):
     update_q = asyncio.Queue()
 
     async def do_improve_headers(peer, q):
+        peer.start_dispatcher()
         r = await improve_headers(peer, bcv, update_q)
         peer.close()
         await peer.wait_for_cleanup()
