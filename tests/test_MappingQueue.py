@@ -1,5 +1,4 @@
 import asyncio
-import time
 import unittest
 
 from pycoinnet.MappingQueue import MappingQueue
@@ -59,7 +58,8 @@ class MappingQueueTest(unittest.TestCase):
         loop.run_until_complete(go(MappingQueue({"map_f": async_transformation_f, "worker_count": 1})))
         self.assertEqual(results, [5, 4, 3])
 
-        self.assertRaises(ValueError, lambda: MappingQueue({"map_f": sync_transformation_f, "worker_count": 1}))
+        self.assertRaises(ValueError, lambda: MappingQueue(
+            {"map_f": sync_transformation_f, "worker_count": 1}))
 
     def test_make_flattener(self):
         loop = asyncio.get_event_loop()
