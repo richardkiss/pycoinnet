@@ -51,33 +51,6 @@ def asyncmap(map_f, q=None, worker_count=None, loop=None):
     return q
 
 
-def make_flatten_callback(output_q):
-
-    async def flatten_callback(items):
-        for item in items:
-            await output_q.put(item)
-
-    return flatten_callback
-
-
-def make_map_f_callback(map_f, output_q):
-
-    async def map_f_callback(item):
-        item = await map_f(item)
-        await output_q.put(item)
-
-    return map_f_callback
-
-
-def make_filter_f_callback(filter_f, output_q):
-
-    async def filter_f_callback(item):
-        if (await filter_f(item)):
-            await output_q.put(item)
-
-    return filter_f_callback
-
-
 class MappingQueue:
     def __init__(self, *args, final_q=None, loop=None):
         """
@@ -89,10 +62,8 @@ class MappingQueue:
         each arg is a dictionary with the following optional parameters:
         input_q: the Queue subclass
         input_q_maxsize: the maxsize of the Queue
-        map_f: the async function that an object is sent to when it comes out of the queue
-        filter_f: the filter function that determines if an object makes it into the output queue
-        flatten: if set, this step flattens lists (wholes lists go in, individual elements come out)
         worker_count: maximum number of tasks pulling from the queue, or None for unlimited
+        callback_f: a function called with the item and the output_q, into which it may put items
         """
 
         # build the queues
@@ -108,34 +79,25 @@ class MappingQueue:
             queues.append(q)
         queues.append(final_q or asyncio.Queue())
 
+        def make_callback_function(callback_f, output_q):
+
+            async def callback(item):
+                await callback_f(item, output_q)
+
+            return callback
+
         # build the pipeline
         cancel_functions = []
         for _, d in enumerate(args):
             input_q, output_q = queues[_:_+2]
-            map_f = d.get("map_f")
-            filter_f = d.get("filter_f")
-            flatten = d.get("flatten")
-
-            if (map_f, filter_f, flatten).count(None) != 2:
-                raise ValueError("exactly one of map_f, filter_f and flatten must be set: %s" % arg)
-
-            if map_f and not asyncio.iscoroutinefunction(map_f):
-                raise ValueError("map_f must be an async coroutine: %s" % arg)
-
+            callback_f = d.get("callback_f")
             worker_count = d.get("worker_count")
+            if not asyncio.iscoroutinefunction(callback_f):
+                raise ValueError("callback_f must be an async coroutine")
 
-            if flatten:
-                # no need for more than one worker in this simple case
-                worker_count = 1
-                callback = make_flatten_callback(output_q)
+            callback = make_callback_function(callback_f, output_q)
 
-            if map_f:
-                callback = make_map_f_callback(map_f, output_q)
-
-            if filter_f:
-                callback = make_filter_f_callback(filter_f, output_q)
-
-            input_q = asyncmap(callback, q=input_q, worker_count=worker_count, loop=loop)
+            input_q = asyncmap(map_f=callback, q=input_q, worker_count=worker_count, loop=loop)
             cancel_functions.append(input_q.cancel)
 
         def cancel():
@@ -157,8 +119,8 @@ class MappingQueue:
     async def put(self, item):
         await self._in_q.put(item)
 
-    async def get(self):
-        return (await self._out_q.get())
-
     def put_nowait(self, item):
         self._in_q.put_nowait(item)
+
+    async def get(self):
+        return (await self._out_q.get())

@@ -20,14 +20,10 @@ def make_getaddrinfo():
     return fake_getaddrinfo
 
 
-def run(f):
-    return asyncio.get_event_loop().run_until_complete(f)
-
-
 class DNSBootstrapTest(unittest.TestCase):
     def test1(self):
         q = dns_bootstrap_host_port_q(MAINNET, getaddrinfo=make_getaddrinfo())
         for _ in range(10 * len(MAINNET.dns_bootstrap)):
-            r = run(q.get())
+            r = asyncio.get_event_loop().run_until_complete(q.get())
             self.assertEqual(r, ("192.168.1.%d" % _, 8333))
         q.cancel()
