@@ -17,7 +17,7 @@ from pycoinnet.networks import MAINNET
 from pycoinnet.MappingQueue import MappingQueue
 
 from pycoinnet.cmds.common import (
-    init_logging, peer_connect_pipeline, storage_base_path, get_current_view, save_bcv
+    init_logging, peer_connect_pipeline, storage_base_path, get_current_view, save_bcv, install_pong_manager
 )
 
 
@@ -29,9 +29,8 @@ async def update_chain_state(network, bcv, count=3):
 
     async def do_improve_headers(peer, q):
         peer.start_dispatcher()
+        install_pong_manager(peer)
         r = await improve_headers(peer, bcv, update_q)
-        peer.close()
-        await peer.wait_for_cleanup()
         await q.put(peer)
 
     filters = [
@@ -42,6 +41,8 @@ async def update_chain_state(network, bcv, count=3):
     for _ in range(count):
         peer = await q.get()
         print("finished update from %s" % peer)
+        peer.close()
+        await peer.wait_for_cleanup()
     q.cancel()
     asyncio.get_event_loop().stop()
 
