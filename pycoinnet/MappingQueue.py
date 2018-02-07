@@ -88,6 +88,12 @@ class MappingQueue:
 
         # build the pipeline
         cancel_functions = []
+
+        for q in queues:
+            cancel = getattr(q, "cancel", None)
+            if callable(cancel):
+                cancel_functions.append(cancel)
+
         for _, d in enumerate(args):
             input_q, output_q = queues[_:_+2]
             callback_f = d.get("callback_f")
