@@ -159,3 +159,6 @@ class MappingQueue:
 
     async def get(self):
         return (await self._out_q.get())
+
+    def put_nowait(self, item):
+        self._in_q.put_nowait(item)

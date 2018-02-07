@@ -13,7 +13,7 @@ def make_getaddrinfo():
         nonlocal counter
         r = []
         for _ in range(10):
-            item = ["family", "type", "proto", "canonname", (counter, 8333)]
+            item = ["family", "type", "proto", "canonname", ("192.168.1.%d" % counter, 8333)]
             r.append(item)
             counter += 1
         return r
@@ -27,11 +27,7 @@ def run(f):
 class DNSBootstrapTest(unittest.TestCase):
     def test1(self):
         q = dns_bootstrap_host_port_q(MAINNET, getaddrinfo=make_getaddrinfo())
-        counter = 0
-        while 1:
+        for _ in range(10 * len(MAINNET.dns_bootstrap)):
             r = run(q.get())
-            if r is None:
-                break
-            self.assertEqual(r, (counter, 8333))
-            counter += 1
-        assert counter == 40
+            self.assertEqual(r, ("192.168.1.%d" % _, 8333))
+        q.cancel()
