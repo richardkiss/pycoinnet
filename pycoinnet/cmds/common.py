@@ -35,9 +35,9 @@ def peer_connect_pipeline(network, tcp_connect_workers=30, handshake_workers=3, 
 
     async def do_tcp_connect(host_port_pair, q):
         host, port = host_port_pair
-        logging.info("TCP connecting to %s:%d", host, port)
+        logging.debug("TCP connecting to %s:%d", host, port)
         reader, writer = await asyncio.open_connection(host=host, port=port)
-        logging.info("TCP connected to %s:%d", host, port)
+        logging.debug("TCP connected to %s:%d", host, port)
         await q.put((reader, writer))
 
     async def do_peer_handshake(rw_tuple, q):

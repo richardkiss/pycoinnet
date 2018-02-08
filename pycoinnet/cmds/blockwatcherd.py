@@ -16,6 +16,7 @@ from pycoinnet.networks import MAINNET
 from pycoinnet.MappingQueue import MappingQueue
 
 from pycoinnet.Blockfetcher import Blockfetcher
+from pycoinnet.version import NODE_NETWORK
 
 from .common import (
     init_logging, storage_base_path, get_current_view, save_bcv, install_pong_manager, peer_connect_pipeline
@@ -31,7 +32,6 @@ def flush_block_update(bcv, path, block_update):
     if block_number is not False:
         bcv.winnow()
         save_bcv(path, bcv)
-    block_update[:] = []
 
 
 async def fetch_blocks(bcv, network, path, max_batch_size=1000):
@@ -44,7 +44,8 @@ async def fetch_blocks(bcv, network, path, max_batch_size=1000):
     peer_q = peer_connect_pipeline(network)
 
     async def do_improve_headers(peer, q):
-        block_fetcher.add_peer(peer)
+        if peer.version["services"] & NODE_NETWORK != 0:
+            block_fetcher.add_peer(peer)
         peers.add(peer)
         install_pong_manager(peer)
         peer.start_dispatcher()
