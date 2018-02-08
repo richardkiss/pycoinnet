@@ -124,6 +124,7 @@ async def block_catchup(peers, bcv, hash_stop=b'\0'*32):
     TARGET_BATCH_TIME = 10
     MIN_BATCH_SIZE = 1
     MAX_BATCH_SIZE = 500
+    batch_timeout = 15
 
     async def fetch_batch(peer_batch, q):
         peer, batch, max_batch_size = peer_batch
@@ -131,7 +132,7 @@ async def block_catchup(peers, bcv, hash_stop=b'\0'*32):
         peer.send_msg("getdata", items=inv_items)
         start_time = loop.time()
         futures = [f for (pri, bh, f, peers_tried) in batch]
-        await asyncio.wait(futures)
+        await asyncio.wait(futures, timeout=batch_timeout)
         end_time = loop.time()
         batch_time = end_time - start_time
         logging.info("completed batch size of %d with time %f", len(inv_items), batch_time)
