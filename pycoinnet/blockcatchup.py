@@ -74,14 +74,13 @@ async def block_catchup(peer, bcv, hash_stop=b'\0'*32):
     block_q = MappingQueue(
         dict(callback_f=improve_headers),
         dict(callback_f=create_block_future, worker_count=1, input_q_maxsize=2),
-        dict(callback_f=wait_future, worker_count=1, input_q_maxsize=100),
+        dict(callback_f=wait_future, worker_count=1, input_q_maxsize=1000),
     )
 
     async def batch_block_fetches(peer_tuple, q):
         peer, max_batch_size = peer_tuple
         batch = []
         skipped = []
-        await asyncio.sleep(5.0)
         while len(batch) == 0 or (len(batch) < max_batch_size and not block_future_queue.empty()):
             item = await block_future_queue.get()
             (pri, bh, f, peers_tried) = item
@@ -92,30 +91,37 @@ async def block_catchup(peer, bcv, hash_stop=b'\0'*32):
             else:
                 batch.append(item)
             block_hash_to_future[bh] = f
-            if len(batch) > 0:
-                await q.put((peer, batch, max_batch_size))
+        if len(batch) > 0:
+            await q.put((peer, batch, max_batch_size))
         for item in skipped:
             if not item[2].done:
                 await block_future_queue.put(item)
 
+    TARGET_BATCH_TIME = 10
+    MIN_BATCH_SIZE = 1
+    MAX_BATCH_SIZE = 500
+
     async def fetch_batch(peer_batch, q):
         peer, batch, max_batch_size = peer_batch
-        print("BATCH SIZE: %s" % len(batch))
         inv_items = [InvItem(ITEM_TYPE_BLOCK, bh) for (pri, bh, f, peers_tried) in batch]
         peer.send_msg("getdata", items=inv_items)
-        # start_time = loop.time()
+        start_time = loop.time()
         futures = [f for (pri, bh, f, peers_tried) in batch]
         await asyncio.wait(futures)
-        # end_time = loop.time()
-        # delay = end_time - start_time
-        # TODO: update batch size
+        end_time = loop.time()
+        batch_time = end_time - start_time
+        logging.info("completed batch size of %d with time %f", len(inv_items), batch_time)
+        time_per_item = batch_time / len(inv_items)
+        new_batch_size = min(max(MIN_BATCH_SIZE, int(TARGET_BATCH_TIME / time_per_item + 0.5)), MAX_BATCH_SIZE)
+        logging.info("new batch size for %s is %d", peer, new_batch_size)
+        max_batch_size = new_batch_size
         for item in batch:
             if not item[2].done():
                 item[3].add(peer)
                 await block_future_queue.put(item)
         await peer_batch_queue.put((peer, max_batch_size))
 
-    block_future_queue = asyncio.PriorityQueue()
+    block_future_queue = asyncio.PriorityQueue(maxsize=1000)
 
     peer_batch_queue = MappingQueue(
         dict(callback_f=batch_block_fetches),
@@ -137,8 +143,8 @@ async def block_catchup(peer, bcv, hash_stop=b'\0'*32):
                     f.set_result(block)
 
     await block_q.put((peer, bcv))
-    await peer_batch_queue.put((peer, 100))
-    await peer_batch_queue.put((peer, 100))
+    await peer_batch_queue.put((peer, MIN_BATCH_SIZE))
+    await peer_batch_queue.put((peer, MIN_BATCH_SIZE))
 
     idx = 0
     while True:
