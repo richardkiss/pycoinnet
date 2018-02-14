@@ -49,7 +49,7 @@ class MappingQueueTest(unittest.TestCase):
             await q.put(5)
             await q.put(4)
             await q.put(3)
-            await q.done()
+            await q.cancel()
 
         loop = asyncio.get_event_loop()
         loop.run_until_complete(go(MappingQueue({"callback_f": async_transformation_f, "worker_count": 1})))
@@ -75,7 +75,7 @@ class MappingQueueTest(unittest.TestCase):
             await q.put([4, 5, 6, 7])
             for _ in range(5):
                 r.append(await q.get())
-            await q.done()
+            await q.cancel()
 
         loop.run_until_complete(go(MappingQueue({"callback_f": flatten_callback})))
         self.assertEqual(r, list(range(8)))

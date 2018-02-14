@@ -93,7 +93,7 @@ class MappingQueue:
 
             return repeated_f
 
-        prior_done_f = None
+        prior_cancel_f = None
         for _, d in enumerate(args):
             input_q, output_q = queues[_:_+2]
             callback_f = d.get("callback_f")
@@ -103,31 +103,29 @@ class MappingQueue:
 
             repeated_f = make_repeated_f(input_q, callback_f, output_q)
 
-            task_group = TaskGroup(repeated_f, worker_count=worker_count, done_callback=prior_done_f, loop=loop)
+            task_group = TaskGroup(repeated_f, worker_count=worker_count, done_callback=prior_cancel_f, loop=loop)
 
-            def make_done(tg):
+            def make_cancel(tg):
 
-                async def done():
+                async def cancel():
                     tg.cancel()
                     await tg.join()
-                return done
+                return cancel
 
-            prior_done_f = make_done(task_group)
+            prior_cancel_f = make_cancel(task_group)
 
         self._loop = loop or asyncio.get_event_loop()
         self._in_q = queues[0]
         self._out_q = queues[-1]
-        self._done_function = prior_done_f
+        self._cancel_function = prior_cancel_f
 
-    async def done(self):
-        if getattr(self, "_done_function", None):
-            await self._done_function()
-            self._done_function = None
-
-    cancel = done
+    async def cancel(self):
+        if getattr(self, "_cancel_function", None):
+            await self._cancel_function()
+            self._cancel_function = None
 
     def __del__(self):
-        f = getattr(self, "_done_function", None)
+        f = getattr(self, "_cancel_function", None)
         if f:
 
             async def callback():
