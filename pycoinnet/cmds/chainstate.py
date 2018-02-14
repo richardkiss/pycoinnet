@@ -43,7 +43,7 @@ async def update_chain_state(network, bcv, count=3):
         print("finished update from %s" % peer)
         peer.close()
         await peer.wait_for_cleanup()
-    q.cancel()
+    await q.cancel()
     asyncio.get_event_loop().stop()
 
 

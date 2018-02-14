@@ -48,64 +48,7 @@ class TaskGroup:
 
     async def join(self):
         await self._task
-    
 
-def asyncmap(map_f, q=None, done_callback_f=None, worker_count=1, loop=None):
-    """
-    This function is an asynchronous mapping function. It pulls items out of a queue,
-    then applies an asynchronous function.
-
-    q: the queue to pull from. If unset, a Queue of unlimited size is created
-    worker_count: the number of tasks created
-    map_f: the function called when an item is pulled from the queue. Must be async.
-    """
-
-    q = q or asyncio.Queue()
-    loop = loop or asyncio.get_event_loop()
-
-    if map_f and not asyncio.iscoroutinefunction(map_f):
-        raise ValueError("map_f must be an async coroutine")
-
-    if done_callback_f and not asyncio.iscoroutinefunction(done_callback_f):
-        raise ValueError("done_callback_f must be an async coroutine")
-
-    _done_event = asyncio.Event()
-
-    async def _worker(q):
-        is_done = asyncio.ensure_future(_done_event.wait())
-        while True:
-            q_get = asyncio.ensure_future(q.get())
-            done, pending = await asyncio.wait([q_get, is_done], return_when=asyncio.FIRST_COMPLETED)
-
-            if q_get not in done:
-                break
-
-            item = await q_get
-            try:
-                await map_f(item)
-            except Exception:
-                pass
-            q.task_done()
-
-        await q.join()
-        print("worker exiting")
-
-    tasks = set()
-    for _ in range(worker_count):
-        tasks.add(loop.create_task(_worker(q)))
-
-    async def done():
-        _done_event.set()
-        await asyncio.wait(tasks)
-        import pdb; pdb.set_trace()
-        if done_callback_f:
-            import pdb; pdb.set_trace()
-            await done_callback_f()
-            import pdb; pdb.set_trace()
-        import pdb; pdb.set_trace()
-
-    q.done = done
-    return q
 
 
 class MappingQueue:
@@ -136,12 +79,19 @@ class MappingQueue:
             queues.append(q)
         queues.append(final_q or asyncio.Queue())
 
-        def make_callback_function(callback_f, output_q):
+        def make_repeated_f(input_q, callback_f, output_q):
 
-            async def callback(item):
-                await callback_f(item, output_q)
+            async def repeated_f(task_group):
+                """
+                Process all items. So repeat until queue is confirmed empty.
+                """
+                while True:
+                    item = await input_q.get()
+                    f_item = await callback_f(item, output_q)
+                    if input_q.empty():
+                        break
 
-            return callback
+            return repeated_f
 
         prior_done_f = None
         for _, d in enumerate(args):
@@ -151,11 +101,18 @@ class MappingQueue:
             if not asyncio.iscoroutinefunction(callback_f):
                 raise ValueError("callback_f must be an async coroutine")
 
-            callback = make_callback_function(callback_f, output_q)
+            repeated_f = make_repeated_f(input_q, callback_f, output_q)
 
-            input_q = asyncmap(
-                map_f=callback, q=input_q, worker_count=worker_count, done_callback_f=prior_done_f, loop=loop)
-            prior_done_f = input_q.done
+            task_group = TaskGroup(repeated_f, worker_count=worker_count, done_callback=prior_done_f, loop=loop)
+
+            def make_done(tg):
+
+                async def done():
+                    tg.cancel()
+                    await tg.join()
+                return done
+
+            prior_done_f = make_done(task_group)
 
         self._loop = loop or asyncio.get_event_loop()
         self._in_q = queues[0]
@@ -166,6 +123,8 @@ class MappingQueue:
         if getattr(self, "_done_function", None):
             await self._done_function()
             self._done_function = None
+
+    cancel = done
 
     def __del__(self):
         f = getattr(self, "_done_function", None)
