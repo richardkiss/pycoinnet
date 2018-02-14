@@ -153,20 +153,6 @@ async def block_catchup(peers, bcv, hash_stop=b'\0'*32):
         dict(callback_f=fetch_batch, input_q_maxsize=2),
     )
 
-    async def get_next_event():
-        name, data = await peer.next_message(unpack_to_dict=True)
-        if name == 'ping':
-            peer.send_msg("pong", nonce=data["nonce"])
-        if name == 'headers':
-            await headers_msg_q.put((name, data))
-        if name in ("block", "merkleblock"):
-            block = data["block"]
-            block_hash = block.hash()
-            if block_hash in block_hash_to_future:
-                f = block_hash_to_future[block_hash]
-                if not f.done():
-                    f.set_result(block)
-
     for peer in peers:
         headers_msg_q = make_event_q(peer, block_hash_to_future)
         await peer_to_block_pipe.put((peer, headers_msg_q))
