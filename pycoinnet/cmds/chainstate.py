@@ -43,12 +43,12 @@ async def update_chain_state(network, bcv, count=3):
         print("finished update from %s" % peer)
         peer.close()
         await peer.wait_for_cleanup()
-    await q.cancel()
+    q.cancel()
     asyncio.get_event_loop().stop()
 
 
 def main():
-    init_logging()
+    init_logging(level=logging.DEBUG, asyncio_debug=True)
     parser = argparse.ArgumentParser(description="Update chain state and print summary.")
     parser.add_argument('-p', "--path", help='The path to the wallet files.')
     parser.add_argument('-l', "--log-file", help="Path to log file", default=None)

@@ -58,23 +58,16 @@ class MappingQueue:
             task_group = TaskGroup(
                 repeated_f, worker_count=worker_count, done_callback=prior_cancel_f, loop=loop)
 
-            def make_cancel(tg):
-
-                async def cancel():
-                    tg.cancel()
-                    await tg.join()
-                return cancel
-
-            prior_cancel_f = make_cancel(task_group)
+            prior_cancel_f = task_group.cancel
 
         self._loop = loop or asyncio.get_event_loop()
         self._in_q = queues[0]
         self._out_q = queues[-1]
         self._cancel_function = prior_cancel_f
 
-    async def cancel(self):
+    def cancel(self):
         if getattr(self, "_cancel_function", None):
-            await self._cancel_function()
+            self._cancel_function()
             self._cancel_function = None
 
     def __del__(self):
