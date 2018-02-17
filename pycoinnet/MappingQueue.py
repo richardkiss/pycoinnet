@@ -1,54 +1,6 @@
 import asyncio
-import logging
 
-
-class TaskGroup:
-    def __init__(self, repeated_f, worker_count=1, done_callback=None, loop=None):
-        loop = loop or asyncio.get_event_loop()
-        if not asyncio.iscoroutinefunction(repeated_f):
-            raise ValueError("repeated_f must be an async coroutine")
-
-        if done_callback and not asyncio.iscoroutinefunction(done_callback):
-            raise ValueError("done_callback must be an async coroutine")
-
-        self._repeated_f = repeated_f
-        self._is_stopping = asyncio.Event()
-        self._is_immediate = False
-        self._task = loop.create_task(self._run(worker_count, done_callback, loop))
-
-    async def _run(self, worker_count, done_callback, loop):
-        self._tasks = set()
-        for _ in range(worker_count):
-            self._tasks.add(loop.create_task(self._worker()))
-        await asyncio.wait(self._tasks)
-        if done_callback:
-            await loop.create_task(done_callback())
-
-    async def _worker(self):
-        done_future = self._is_stopping.wait()
-        while True:
-            repeated_future = asyncio.ensure_future(self._repeated_f(self))
-            done, pending = await asyncio.wait(
-                [done_future, repeated_future], return_when=asyncio.FIRST_COMPLETED)
-            if self._is_immediate or not repeated_future.done():
-                break
-
-            try:
-                await repeated_future
-            except Exception as ex:
-                logging.exception("problem in worker thread")
-
-        if not repeated_future.done():
-            repeated_future.cancel()
-
-    def cancel(self, immediate=False):
-        if not self._is_stopping.is_set():
-            self._is_immediate = immediate
-            self._is_stopping.set()
-
-    async def join(self):
-        await self._task
-
+from .task_group import TaskGroup
 
 
 class MappingQueue:
@@ -87,7 +39,7 @@ class MappingQueue:
                 """
                 while True:
                     item = await input_q.get()
-                    f_item = await callback_f(item, output_q)
+                    await callback_f(item, output_q)
                     if input_q.empty():
                         break
 
@@ -103,7 +55,8 @@ class MappingQueue:
 
             repeated_f = make_repeated_f(input_q, callback_f, output_q)
 
-            task_group = TaskGroup(repeated_f, worker_count=worker_count, done_callback=prior_cancel_f, loop=loop)
+            task_group = TaskGroup(
+                repeated_f, worker_count=worker_count, done_callback=prior_cancel_f, loop=loop)
 
             def make_cancel(tg):
 
