@@ -95,8 +95,12 @@ async def fetch_blocks(bcv, network, path, max_batch_size=1000):
 
 def main():
     init_logging()
-    parser = argparse.ArgumentParser(description="Update chain state and print summary.")
+    parser = argparse.ArgumentParser(description="Watch Bitcoin network for new blocks.")
     parser.add_argument('-p', "--path", help='The path to the wallet files.')
+    parser.add_argument(
+        '-f', "--fast-forward", type=int,
+        help="block index to fast-forward to (ie. don't download full blocks prior to this one)", default=0
+    )
 
     args = parser.parse_args()
     path = os.path.join(args.path or storage_base_path(), "blockwatcherd.json")

@@ -13,13 +13,22 @@ from pycoinnet.Peer import Peer
 from pycoinnet.version import version_data_for_peer
 
 
-def init_logging(debug=False):
-    LOG_FORMAT = ('%(asctime)s [%(process)d] [%(levelname)s] '
-                  '%(filename)s:%(lineno)d %(message)s')
+LOG_FORMAT = '%(asctime)s [%(process)d] [%(levelname)s] %(filename)s:%(lineno)d %(message)s'
 
-    asyncio.tasks._DEBUG = True
-    logging.basicConfig(level=logging.DEBUG, format=LOG_FORMAT)
-    logging.getLogger("asyncio").setLevel(logging.DEBUG if debug else logging.INFO)
+
+def init_logging(level=logging.NOTSET, asyncio_debug=False):
+    asyncio.tasks._DEBUG = asyncio_debug
+    logging.basicConfig(level=level, format=LOG_FORMAT)
+    logging.getLogger("asyncio").setLevel(logging.DEBUG if asyncio_debug else logging.INFO)
+
+
+def set_log_file(logPath, level=logging.NOTSET):
+    if logPath is None:
+        return
+    new_log = logging.FileHandler(logPath)
+    new_log.setLevel(level)
+    new_log.setFormatter(logging.Formatter(LOG_FORMAT))
+    logging.getLogger().addHandler(new_log)
 
 
 def storage_base_path():

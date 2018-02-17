@@ -17,7 +17,7 @@ from pycoinnet.networks import MAINNET
 from pycoinnet.MappingQueue import MappingQueue
 
 from pycoinnet.cmds.common import (
-    init_logging, peer_connect_pipeline, storage_base_path, get_current_view, save_bcv, install_pong_manager
+    init_logging, set_log_file, peer_connect_pipeline, storage_base_path, get_current_view, save_bcv, install_pong_manager
 )
 
 
@@ -48,11 +48,15 @@ async def update_chain_state(network, bcv, count=3):
 
 
 def main():
-    init_logging(debug=False)
+    init_logging()
     parser = argparse.ArgumentParser(description="Update chain state and print summary.")
     parser.add_argument('-p', "--path", help='The path to the wallet files.')
+    parser.add_argument('-l', "--log-file", help="Path to log file", default=None)
 
     args = parser.parse_args()
+
+    set_log_file(args.log_file)
+
     path = os.path.join(args.path or storage_base_path(), "chainstate.json")
 
     bcv = get_current_view(path)
