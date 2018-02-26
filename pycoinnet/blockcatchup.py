@@ -1,11 +1,11 @@
 import asyncio
 import logging
 
-from pycoin.message.InvItem import InvItem, ITEM_TYPE_BLOCK
+from pycoin.message.InvItem import InvItem, ITEM_TYPE_BLOCK, ITEM_TYPE_MERKLEBLOCK
 from pycoinnet.MappingQueue import MappingQueue
 
 
-def _make_event_q(peer, block_hash_to_future):
+def _make_event_q(peer, inv_item_hash_to_future):
 
     headers_msg_q = asyncio.Queue()
 
@@ -19,8 +19,9 @@ def _make_event_q(peer, block_hash_to_future):
             if name in ("block", "merkleblock"):
                 block = data["block"]
                 block_hash = block.hash()
-                if block_hash in block_hash_to_future:
-                    f = block_hash_to_future[block_hash]
+                inv_item = InvItem(ITEM_TYPE_BLOCK if name == "block" else ITEM_TYPE_MERKLEBLOCK, block_hash)
+                if inv_item in inv_item_hash_to_future:
+                    f = inv_item_hash_to_future[inv_item]
                     if not f.done():
                         f.set_result(block)
                 else:
@@ -30,16 +31,18 @@ def _make_event_q(peer, block_hash_to_future):
     return headers_msg_q
 
 
-def _create_peer_batch_queue(block_future_queue, target_batch_time=10, max_batch_size=500):
+def _create_peer_batch_queue(target_batch_time=10, max_batch_size=500):
+
+    inv_item_future_queue = asyncio.PriorityQueue(maxsize=1000)
 
     async def batch_block_fetches(peer_batch_tuple, q):
         peer, desired_batch_size = peer_batch_tuple
         batch = []
         skipped = []
         logging.info("peer %s trying to build batch up to size %d", peer, desired_batch_size)
-        while len(batch) == 0 or (len(batch) < desired_batch_size and not block_future_queue.empty()):
-            item = await block_future_queue.get()
-            (priority, bh, f, peers_tried) = item
+        while len(batch) == 0 or (len(batch) < desired_batch_size and not inv_item_future_queue.empty()):
+            item = await inv_item_future_queue.get()
+            (priority, inv_item, f, peers_tried) = item
             if f.done():
                 continue
             if peer in peers_tried:
@@ -50,12 +53,12 @@ def _create_peer_batch_queue(block_future_queue, target_batch_time=10, max_batch
             await q.put((peer, batch, desired_batch_size))
         for item in skipped:
             if not item[2].done:
-                await block_future_queue.put(item)
+                await inv_item_future_queue.put(item)
 
     async def fetch_batch(peer_batch, q):
         loop = asyncio.get_event_loop()
         peer, batch, prior_max = peer_batch
-        inv_items = [InvItem(ITEM_TYPE_BLOCK, bh) for (priority, bh, f, peers_tried) in batch]
+        inv_items = [inv_item for (priority, inv_item, f, peers_tried) in batch]
         peer.send_msg("getdata", items=inv_items)
         start_time = loop.time()
         futures = [f for (priority, bh, f, peers_tried) in batch]
@@ -68,17 +71,18 @@ def _create_peer_batch_queue(block_future_queue, target_batch_time=10, max_batch
         new_batch_size = min(prior_max * 4, int(target_batch_time * item_per_unit_time + 0.5))
         new_batch_size = min(max(1, new_batch_size), max_batch_size)
         logging.info("new batch size for %s is %d", peer, new_batch_size)
-        for (priority, bh, f, peers_tried) in batch:
+        for (priority, inv_item, f, peers_tried) in batch:
             if not f.done():
                 peers_tried.add(peer)
-                await block_future_queue.put((priority, bh, f, peers_tried))
+                await inv_item_future_queue.put((priority, inv_item, f, peers_tried))
         await peer_batch_queue.put((peer, new_batch_size))
 
     peer_batch_queue = MappingQueue(
         dict(callback_f=batch_block_fetches),
         dict(callback_f=fetch_batch, input_q_maxsize=2),
     )
-    return peer_batch_queue
+
+    return peer_batch_queue, inv_item_future_queue
 
 
 def create_peer_to_block_pipe(bcv, hash_stop):
@@ -90,23 +94,31 @@ def create_peer_to_block_pipe(bcv, hash_stop):
 
     peer_to_block_pipe = asyncio.Queue()
 
-    block_hash_to_future = dict()
+    inv_item_hash_to_future = dict()
 
-    block_future_queue = asyncio.PriorityQueue(maxsize=1000)
+    peer_batch_queue, inv_item_future_queue = _create_peer_batch_queue()
 
-    peer_batch_queue = _create_peer_batch_queue(block_future_queue)
-
-    async def block_future_for_hash(block_hash):
-        f = block_hash_to_future.get(block_hash)
+    async def inv_future_for_hash(inv_item):
+        f = inv_item_hash_to_future.get(inv_item)
         if not f:
             f = asyncio.Future()
-            block_hash_to_future[block_hash] = f
-        item = (0, block_hash, f, set())
-        await block_future_queue.put(item)
+            inv_item_hash_to_future[inv_item] = f
+
+            def remove_later(f):
+
+                def remove():
+                    if inv_item in inv_item_hash_to_future:
+                        del inv_item_hash_to_future[inv_item]
+
+                asyncio.get_event_loop().call_later(5, remove)
+
+            f.add_done_callback(remove_later)
+        item = (0, inv_item, f, set())
+        await inv_item_future_queue.put(item)
         return f
 
     async def note_peer(peer, q):
-        headers_msg_q = _make_event_q(peer, block_hash_to_future)
+        headers_msg_q = _make_event_q(peer, inv_item_hash_to_future)
         pair = (peer, headers_msg_q)
         await peer_batch_queue.put((peer, initial_batch_size))
         await peer_batch_queue.put((peer, initial_batch_size))
@@ -124,10 +136,9 @@ def create_peer_to_block_pipe(bcv, hash_stop):
         if block_locator_hashes[-1] == bcv.hash_initial_block():
             # this hack is necessary because the stupid default client
             # does not send the genesis block!
-            # TODO: make this an api
-            f = await block_future_for_hash(headers[0].previous_block_hash)
-            extra_block = await f
-            headers = [extra_block] + headers
+            f = await inv_future_for_hash(InvItem(ITEM_TYPE_BLOCK, headers[0].previous_block_hash))
+            block = await f
+            headers = [block] + headers
 
         block_number = bcv.do_headers_improve_path(headers)
         if block_number is False:
@@ -155,7 +166,7 @@ def create_peer_to_block_pipe(bcv, hash_stop):
         for bh, pri in block_hash_priority_pair_list:
             if pri < 200000:
                 continue
-            f = await block_future_for_hash(bh)
+            f = await inv_future_for_hash(InvItem(ITEM_TYPE_BLOCK, bh))
             await q.put(f)
 
     async def wait_future(future, q):
@@ -163,7 +174,6 @@ def create_peer_to_block_pipe(bcv, hash_stop):
             await q.put(None)
             return
         block = await future
-        del block_hash_to_future[block.hash()]
         await q.put(block)
 
     improve_headers_looped_pipe = MappingQueue(
