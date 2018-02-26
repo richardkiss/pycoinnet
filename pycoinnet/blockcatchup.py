@@ -96,6 +96,15 @@ def create_peer_to_block_pipe(bcv, hash_stop):
 
     peer_batch_queue = _create_peer_batch_queue(block_future_queue)
 
+    async def block_future_for_hash(block_hash):
+        f = block_hash_to_future.get(block_hash)
+        if not f:
+            f = asyncio.Future()
+            block_hash_to_future[block_hash] = f
+        item = (0, block_hash, f, set())
+        await block_future_queue.put(item)
+        return f
+
     async def note_peer(peer, q):
         headers_msg_q = _make_event_q(peer, block_hash_to_future)
         pair = (peer, headers_msg_q)
@@ -116,10 +125,7 @@ def create_peer_to_block_pipe(bcv, hash_stop):
             # this hack is necessary because the stupid default client
             # does not send the genesis block!
             # TODO: make this an api
-            f = asyncio.Future()
-            block_hash_to_future[headers[0].previous_block_hash] = f
-            item = (0, headers[0].previous_block_hash, f, set())
-            await block_future_queue.put(item)
+            f = await block_future_for_hash(headers[0].previous_block_hash)
             extra_block = await f
             headers = [extra_block] + headers
 
@@ -149,11 +155,7 @@ def create_peer_to_block_pipe(bcv, hash_stop):
         for bh, pri in block_hash_priority_pair_list:
             if pri < 200000:
                 continue
-            f = block_hash_to_future.get(bh) or asyncio.Future()
-            block_hash_to_future[bh] = f
-            peers_tried = set()
-            item = (pri, bh, f, peers_tried)
-            await block_future_queue.put(item)
+            f = await block_future_for_hash(bh)
             await q.put(f)
 
     async def wait_future(future, q):
