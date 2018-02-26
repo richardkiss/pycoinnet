@@ -26,11 +26,11 @@ def _make_event_q(peer, block_hash_to_future):
                 else:
                     logging.error("missing future for block %s", block.id())
 
-    asyncio.get_event_loop().create_task(event_loop(peer))
+    headers_msg_q.task = asyncio.get_event_loop().create_task(event_loop(peer))
     return headers_msg_q
 
 
-def _create_peer_batch_queue(loop, block_future_queue):
+def _create_peer_batch_queue(block_future_queue, target_batch_time=10, max_batch_size=500):
 
     async def batch_block_fetches(peer_batch_tuple, q):
         peer, desired_batch_size = peer_batch_tuple
@@ -52,11 +52,8 @@ def _create_peer_batch_queue(loop, block_future_queue):
             if not item[2].done:
                 await block_future_queue.put(item)
 
-    target_batch_time = 10
-    max_batch_size = 500
-    target_batch_time = 15
-
     async def fetch_batch(peer_batch, q):
+        loop = asyncio.get_event_loop()
         peer, batch, prior_max = peer_batch
         inv_items = [InvItem(ITEM_TYPE_BLOCK, bh) for (priority, bh, f, peers_tried) in batch]
         peer.send_msg("getdata", items=inv_items)
@@ -89,8 +86,6 @@ def create_peer_to_block_pipe(bcv, hash_stop):
     return a MappingQueue that accepts: peer objects
     and yields: block objects
     """
-    loop = asyncio.get_event_loop()
-
     initial_batch_size = 1
 
     peer_to_block_pipe = asyncio.Queue()
@@ -99,7 +94,7 @@ def create_peer_to_block_pipe(bcv, hash_stop):
 
     block_future_queue = asyncio.PriorityQueue(maxsize=1000)
 
-    peer_batch_queue = _create_peer_batch_queue(loop, block_future_queue)
+    peer_batch_queue = _create_peer_batch_queue(block_future_queue)
 
     async def note_peer(peer, q):
         headers_msg_q = _make_event_q(peer, block_hash_to_future)
@@ -120,7 +115,8 @@ def create_peer_to_block_pipe(bcv, hash_stop):
         if block_locator_hashes[-1] == bcv.hash_initial_block():
             # this hack is necessary because the stupid default client
             # does not send the genesis block!
-            f = loop.create_future()
+            # TODO: make this an api
+            f = asyncio.Future()
             block_hash_to_future[headers[0].previous_block_hash] = f
             item = (0, headers[0].previous_block_hash, f, set())
             await block_future_queue.put(item)
@@ -177,21 +173,6 @@ def create_peer_to_block_pipe(bcv, hash_stop):
     return improve_headers_looped_pipe
 
 
-async def block_catchup(peers, bcv, hash_stop=b'\0'*32):
-    peer_to_block_pipe = create_peer_to_block_pipe(bcv, hash_stop)
-
-    for peer in peers:
-        await peer_to_block_pipe.put(peer)
-
-    idx = 0
-    while True:
-        block = await peer_to_block_pipe.get()
-        if block is None:
-            break
-        print("%d : %s" % (idx, block))
-        idx += 1
-
-
 def main():
     from pycoinnet.cmds.common import peer_connect_pipeline, init_logging
     from pycoinnet.BlockChainView import BlockChainView
@@ -214,7 +195,20 @@ def main():
             host_q.put_nowait(("192.168.1.99", 8333))
             peer_q = peer_connect_pipeline(MAINNET, host_q=host_q)
             peers.append(await peer_q.get())
-        await block_catchup(peers, bcv)
+
+        hash_stop = b'\0'*32
+        peer_to_block_pipe = create_peer_to_block_pipe(bcv, hash_stop)
+
+        for peer in peers:
+            await peer_to_block_pipe.put(peer)
+
+        idx = 0
+        while True:
+            block = await peer_to_block_pipe.get()
+            if block is None:
+                break
+            print("%d : %s" % (idx, block))
+            idx += 1
 
     asyncio.get_event_loop().run_until_complete(go())
 
