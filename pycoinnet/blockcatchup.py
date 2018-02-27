@@ -82,21 +82,7 @@ def _create_peer_batch_queue(target_batch_time=10, max_batch_size=500):
         dict(callback_f=fetch_batch, input_q_maxsize=2),
     )
 
-    return peer_batch_queue, inv_item_future_queue
-
-
-def create_peer_to_block_pipe(bcv, hash_stop):
-    """
-    return a MappingQueue that accepts: peer objects
-    and yields: block objects
-    """
-    initial_batch_size = 1
-
-    peer_to_block_pipe = asyncio.Queue()
-
     inv_item_hash_to_future = dict()
-
-    peer_batch_queue, inv_item_future_queue = _create_peer_batch_queue()
 
     async def inv_future_for_hash(inv_item):
         f = inv_item_hash_to_future.get(inv_item)
@@ -117,7 +103,21 @@ def create_peer_to_block_pipe(bcv, hash_stop):
         await inv_item_future_queue.put(item)
         return f
 
+    return peer_batch_queue, inv_future_for_hash, inv_item_hash_to_future
+
+
+def create_peer_to_block_pipe(bcv, hash_stop):
+    """
+    return a MappingQueue that accepts: peer objects
+    and yields: block objects
+    """
+
+    improve_headers_pipe = asyncio.Queue()
+
+    peer_batch_queue, inv_future_for_hash, inv_item_hash_to_future = _create_peer_batch_queue()
+
     async def note_peer(peer, q):
+        initial_batch_size = 1
         headers_msg_q = _make_event_q(peer, inv_item_hash_to_future)
         pair = (peer, headers_msg_q)
         await peer_batch_queue.put((peer, initial_batch_size))
@@ -153,7 +153,7 @@ def create_peer_to_block_pipe(bcv, hash_stop):
             assert the_tuple[0] == idx
             hashes.append(the_tuple[1])
         await q.put((block_number, hashes))
-        await peer_to_block_pipe.put(pair)
+        await improve_headers_pipe.put(pair)
 
     async def create_block_future(item, q):
         if item is None:
@@ -163,6 +163,8 @@ def create_peer_to_block_pipe(bcv, hash_stop):
         logging.info("got %d new header(s) starting at %d" % (len(block_hashes), first_block_index))
         block_hash_priority_pair_list = [(bh, first_block_index + _) for _, bh in enumerate(block_hashes)]
 
+        # TODO: put an extra layer here to let the caller decide what to do
+        # either download the full block, the merkle block, or skip it
         for bh, pri in block_hash_priority_pair_list:
             if pri < 200000:
                 continue
@@ -176,13 +178,13 @@ def create_peer_to_block_pipe(bcv, hash_stop):
         block = await future
         await q.put(block)
 
-    improve_headers_looped_pipe = MappingQueue(
+    peer_to_block_pipe = MappingQueue(
         dict(callback_f=note_peer),
-        dict(callback_f=improve_headers, worker_count=1, input_q=peer_to_block_pipe),
+        dict(callback_f=improve_headers, worker_count=1, input_q=improve_headers_pipe),
         dict(callback_f=create_block_future, worker_count=1, input_q_maxsize=2),
         dict(callback_f=wait_future, worker_count=1, input_q_maxsize=1000),
     )
-    return improve_headers_looped_pipe
+    return peer_to_block_pipe
 
 
 def main():

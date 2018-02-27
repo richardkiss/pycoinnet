@@ -29,7 +29,7 @@ def _make_repeated_f(input_q, callback_f, output_q):
             done, pending = await asyncio.wait(
                 [input_q._is_stopping_future, input_q_get], return_when=asyncio.FIRST_COMPLETED)
             if input_q_get.done():
-                item = await input_q_get
+                item = input_q_get.result()
                 await callback_f(item, output_q)
                 input_q.task_done()
             else:
