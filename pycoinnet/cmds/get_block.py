@@ -9,17 +9,11 @@ from pycoinnet.cmds.common import init_logging, peer_connect_pipeline
 from pycoinnet.MappingQueue import MappingQueue
 from pycoinnet.inv_batcher import InvBatcher
 from pycoinnet.version import NODE_NETWORK
+from pycoinnet.PeerEvent import PeerEvent
 
 
 async def set_up_inv_batcher(network, max_peer_count=8):
     inv_batcher = InvBatcher()
-
-    async def event_loop(peer):
-        while True:
-            name, data = await peer.next_message(unpack_to_dict=True)
-            inv_batcher.handle_event(peer, name, data)
-            if name == 'ping':
-                peer.send_msg("pong", nonce=data["nonce"])
 
     # add some peers to InvBatcher
     async def do_add_peer(peer, q):
@@ -27,8 +21,7 @@ async def set_up_inv_batcher(network, max_peer_count=8):
         if version["services"] & NODE_NETWORK == 0:
             peer.close()
             return
-        await inv_batcher.add_peer(peer)
-        inv_batcher.task = asyncio.get_event_loop().create_task(event_loop(peer))
+        await inv_batcher.add_peer(PeerEvent(peer))
         nonlocal max_peer_count
         max_peer_count -= 1
         if max_peer_count <= 0:

@@ -11,24 +11,19 @@ import os.path
 import sqlite3
 import time
 
+from pycoin.bloomfilter import BloomFilter, filter_size_required, hash_function_count_required
 from pycoin.convention import satoshi_to_mbtc
 from pycoin.key.validate import is_address_valid
-from pycoin.serialize import b2h_rev
+from pycoin.message.InvItem import ITEM_TYPE_MERKLEBLOCK
 from pycoin.tx import Tx
 from pycoin.tx.tx_utils import create_tx
 from pycoin.wallet.SQLite3Persistence import SQLite3Persistence
 # from pycoin.wallet.SQLite3Wallet import SQLite3Wallet
 
-from pycoinnet.dnsbootstrap import dns_bootstrap_host_port_lists
-from pycoinnet.networks import MAINNET
-from pycoinnet.InvFetcher import InvFetcher
-from pycoinnet.Peer import Peer
+from pycoinnet.cmds.common import init_logging, peer_connect_pipeline
 
-from pycoinnet.BloomFilter import BloomFilter, filter_size_required, hash_function_count_required
-from pycoinnet.BlockChainView import BlockChainView, HASH_INITIAL_BLOCK
-from pycoinnet.msg.InvItem import InvItem, ITEM_TYPE_MERKLEBLOCK
-from pycoinnet.msg.PeerAddress import PeerAddress
-from pycoinnet.version import version_data_for_peer
+from pycoinnet.networks import MAINNET
+from pycoinnet.BlockChainView import BlockChainView
 
 
 def storage_base_path():
@@ -46,108 +41,11 @@ class Keychain(object):
         return spendable.bitcoin_address() in self.interested_addresses
 
 
-@asyncio.coroutine
-def _fetch_missing(peer, header):
-    the_hash = header.previous_block_hash
-    inv_item = InvItem(ITEM_TYPE_MERKLEBLOCK, the_hash)
-    logging.info("requesting missing block header %s", inv_item)
-    peer.send_msg("getdata", items=[inv_item])
-    name, data = yield from peer.wait_for_response('merkleblock')
-    block = data["header"]
-    logging.info("got missing block %s", block.id())
-    return block
-
-
-@asyncio.coroutine
-def do_get_headers(peer, block_locator_hashes, hash_stop=b'\0'*32):
-    peer.send_msg(message_name="getheaders", version=1, hashes=block_locator_hashes, hash_stop=hash_stop)
-    name, data = yield from peer.wait_for_response('headers')
-    headers = [bh for bh, t in data["headers"]]
-    return headers
-
-
-@asyncio.coroutine
-def do_updates(bcv, network, nonce, last_block_index, bloom_filter, early_timestamp, host, port):
-    reader, writer = yield from asyncio.open_connection(host=host, port=port)
-    logging.info("connecting to %s:%d", host, port)
-    peer = Peer(reader, writer, network.magic_header, network.parse_from_data, network.pack_from_data)
-    version_data = version_data_for_peer(peer)
-    remote_handshake = yield from peer.perform_handshake(**version_data)
-    assert remote_handshake is not None
-    peer.start_dispatcher()
-
-    filter_bytes, hash_function_count, tweak = bloom_filter.filter_load_params()
-    # TODO: figure out flags
-    flags = 0
-    peer.send_msg(
-        "filterload", filter=filter_bytes, hash_function_count=hash_function_count,
-        tweak=tweak, flags=flags)
-
-    inv_fetcher = InvFetcher(peer)
-    msg_handler_id = peer.add_msg_handler(inv_fetcher.handle_msg)
-    assert msg_handler_id is not None
-    while True:
-        block_locator_hashes = bcv.block_locator_hashes()
-        headers = yield from do_get_headers(peer, bcv.block_locator_hashes())
-        if block_locator_hashes[-1] == HASH_INITIAL_BLOCK:
-            # this hack is necessary because the stupid default client
-            # does not send the genesis block!
-            extra_block = yield from _fetch_missing(peer, headers[0])
-            headers = [extra_block] + headers
-
-        if len(headers) == 0:
-            break
-
-        block_number = bcv.do_headers_improve_path(headers)
-        if block_number is False:
-            break
-        logging.debug("block header count is now %d", block_number)
-        block_index = block_number
-        index, block_hash, work = bcv.tuple_for_index(block_index)
-        # find the header with this hash
-
-        for idx in range(len(headers)):
-            if headers[idx].hash() == block_hash:
-                break
-        else:
-            logging.error("can't find block header with hash %s", b2h_rev(block_hash))
-            break
-
-        block_futures = []
-        start_index = block_index + idx
-        for offset, header in enumerate(headers):
-            index = start_index + offset
-            if index % 1000 == 0:
-                print("at header %6d (%s)" % (
-                    index, datetime.datetime.fromtimestamp(header.timestamp)))
-            if header.timestamp < early_timestamp:
-                continue
-            inv_item = InvItem(item_type=ITEM_TYPE_MERKLEBLOCK, data=header.hash())
-            block_futures.append((index, inv_fetcher.fetch(inv_item)))
-            block_index += 1
-
-        def process_tx(tx):
-            print("processing %s" % tx)
-
-        if len(block_futures) > 0:
-            import pdb; pdb.set_trace()
-        for index, bf in block_futures:
-            merkle_block = yield from bf
-            if len(merkle_block.tx_futures) > 0:
-                print("got block %6d: %s... with %d transactions" % (
-                    index, merkle_block.id()[:32], len(merkle_block.tx_futures)))
-            for tx_f in merkle_block.tx_futures:
-                tx = yield from tx_f
-                process_tx(tx)
-        bcv.winnow()
-
-
-def wallet_fetch(path, args):
+async def wallet_fetch(path, args):
     early_timestamp = calendar.timegm(args.date)
 
     print(path)
     print("wallet. Fetching.")
-    network = MAINNET
 
     addresses = [a[:-1] for a in open(os.path.join(path, "watch_addresses")).readlines()]
     keychain = Keychain(addresses)
@@ -185,46 +83,33 @@ def wallet_fetch(path, args):
     for s in spendables:
         bloom_filter.add_spendable(s)
 
-    merkle_block_index_queue = asyncio.Queue()
-
     # next: connect to a host
 
-    host_futures = dns_bootstrap_host_port_lists(network, 10)
-    
-    loop = asyncio.get_event_loop()
-    host, port = loop.run_until_complete(host_futures[0])
+    from pycoinnet.blockcatchup import create_peer_to_block_pipe
 
-    USE_LOCAL_HOST = True  # False
-    if USE_LOCAL_HOST:
-        # use a local host instead of going to DNS
-        host = "127.0.0.1"
-        port = 38333
+    def filter_f(bh, pri):
+        return ITEM_TYPE_MERKLEBLOCK
 
-    nonce = 3412075413544046060
-    last_block_index = 1
-    loop.run_until_complete(do_updates(
-        blockchain_view, network, nonce, last_block_index, bloom_filter, early_timestamp, host, port))
+    peer_to_block_pipe = create_peer_to_block_pipe(blockchain_view, filter_f)
+    peer_q = peer_connect_pipeline(args.network)
 
-    return
-    @asyncio.coroutine
-    def process_updates(merkle_block_index_queue):
-        while True:
-            merkle_block, index = yield from merkle_block_index_queue.get()
-            wallet._add_block(merkle_block, index, merkle_block.txs)
-            bcv_json = blockchain_view.as_json()
-            persistence.set_global("blockchain_view", bcv_json)
-            if len(merkle_block.txs) > 0:
-                print("got block %06d: %s... with %d transactions" % (
-                    index, merkle_block.id()[:32], len(merkle_block.txs)))
-            if index % 1000 == 0:
-                print("at block %06d (%s)" % (
-                        index, datetime.datetime.fromtimestamp(merkle_block.timestamp)))
-            if merkle_block_index_queue.empty():
-                persistence.commit()
+    for _ in range(3):
+        peer = await peer_q.get()
+        await peer_to_block_pipe.put(peer)
 
-    # we need to keep the task around in the stack context or it will be GCed
-    t = asyncio.Task(process_updates(merkle_block_index_queue))
-    asyncio.get_event_loop().run_forever()
+    while True:
+        merkle_block, index = await peer_to_block_pipe.get()
+        import pdb; pdb.set_trace()
+        wallet._add_block(merkle_block, index, merkle_block.txs)
+        bcv_json = blockchain_view.as_json()
+        persistence.set_global("blockchain_view", bcv_json)
+        if len(merkle_block.txs) > 0:
+            print("got block %06d: %s... with %d transactions" % (
+                index, merkle_block.id()[:32], len(merkle_block.txs)))
+        if index % 1000 == 0:
+            print("at block %06d (%s)" % (
+                    index, datetime.datetime.fromtimestamp(merkle_block.timestamp)))
+            persistence.commit()
 
 
 def wallet_balance(path, args):
@@ -300,7 +185,7 @@ def wallet_exclude(path, args):
     persistence.commit()
 
 
-def main():
+def create_parser():
     parser = argparse.ArgumentParser(description="SPV wallet.")
     parser.add_argument('-p', "--path", help='The path to the wallet files.')
     subparsers = parser.add_subparsers(help="commands", dest='command')
@@ -321,12 +206,22 @@ def main():
 
     exclude_parser = subparsers.add_parser('exclude', help="Exclude spendables from a given transaction")
     exclude_parser.add_argument('path_to_tx', help="path to transaction")
+    return parser
+
+
+def main():
+    init_logging()
+    parser = create_parser()
 
     args = parser.parse_args()
     path = args.path or storage_base_path()
 
+    args.network = MAINNET # BRAIN DAMAGE
+
+    loop = asyncio.get_event_loop()
+
     if args.command == "fetch":
-        wallet_fetch(path, args)
+        loop.run_until_complete(wallet_fetch(path, args))
     if args.command == "balance":
         wallet_balance(path, args)
     if args.command == "create":
