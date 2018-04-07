@@ -81,11 +81,13 @@ class BlockfetcherTest(unittest.TestCase):
         self.loop.stop()
         self.loop.run_forever()
 
+    @unittest.skip
     def test_BlockHandler(self):
         for d13 in (0, 0.5, 5.0):
             for d23 in (0, 2.0, 10.0):
                 self._test_with_delays(d13, d23)
 
+    @unittest.skip
     def test_stupid_peer(self):
         # in this test, peer1 only responds to odd numbered blocks
         peer1_3, peer3_1 = create_pair(self.loop)
