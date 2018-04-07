@@ -1,7 +1,7 @@
 import asyncio
 import logging
 
-from pycoin.message.InvItem import InvItem, ITEM_TYPE_BLOCK, ITEM_TYPE_MERKLEBLOCK
+from pycoin.message.InvItem import InvItem, ITEM_TYPE_TX, ITEM_TYPE_BLOCK, ITEM_TYPE_MERKLEBLOCK
 from pycoinnet.MappingQueue import MappingQueue
 
 
@@ -56,7 +56,7 @@ class InvBatcher:
 
         self._peer_batch_queue = MappingQueue(
             dict(callback_f=batch_getdata_fetches),
-            dict(callback_f=fetch_batch, input_q_maxsize=2),
+            dict(callback_f=fetch_batch, input_q_maxsize=2, worker_count=2),
         )
 
         self._inv_item_hash_to_future = dict()
@@ -86,17 +86,23 @@ class InvBatcher:
             await self._inv_item_future_queue.put(item)
         return f
 
-    def handle_block_event(self, peer, name, data):
-        block = data["block" if name == "block" else "header"]
-        block_hash = block.hash()
-        inv_item = InvItem(ITEM_TYPE_BLOCK if name == "block" else ITEM_TYPE_MERKLEBLOCK, block_hash)
+    def _handle_inv_response(self, item_type, item):
+        item_hash = item.hash()
+        inv_item = InvItem(item_type, item_hash)
         if inv_item in self._inv_item_hash_to_future:
             f = self._inv_item_hash_to_future[inv_item]
             if not f.done():
-                f.set_result(block)
+                f.set_result(item)
         else:
-            logging.error("missing future for block %s", block.id())
+            logging.error("missing future for item %s", item.id())
+
+    def handle_block_event(self, peer, name, data):
+        item = data["block" if name == "block" else "header"]
+        self._handle_inv_response(ITEM_TYPE_BLOCK if name == "block" else ITEM_TYPE_MERKLEBLOCK, item)
+
+    def handle_tx_event(self, peer, name, data):
+        item = data["tx"]
+        self._handle_inv_response(ITEM_TYPE_TX, item)
 
     def stop(self):
         self._peer_batch_queue.stop()
-
