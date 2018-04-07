@@ -9,10 +9,13 @@ async def flatten_callback(items, output_q):
         await output_q.put(item)
 
 
+def run(f):
+    return asyncio.get_event_loop().run_until_complete(f)
+
+
 class MappingQueueTest(unittest.TestCase):
 
     def test_pipeline(self):
-        loop = asyncio.get_event_loop()
         results = []
 
         async def callback_f(item, q):
@@ -28,7 +31,7 @@ class MappingQueueTest(unittest.TestCase):
             q.stop()
             await q.wait()
 
-        loop.run_until_complete(go(q))
+        run(go(q))
         self.assertEqual(results, [5, 4, 3])
 
     def test_asyncmap(self):
@@ -49,22 +52,18 @@ class MappingQueueTest(unittest.TestCase):
             q.stop()
             await q.wait()
 
-        loop = asyncio.get_event_loop()
-
         results = []
-        loop.run_until_complete(go(MappingQueue({"callback_f": make_async_transformation_f(results), "worker_count": 1})))
+        run(go(MappingQueue({"callback_f": make_async_transformation_f(results), "worker_count": 1})))
         self.assertEqual(results, [5, 4, 3])
 
         results = []
-        loop.run_until_complete(go(MappingQueue({"callback_f": make_async_transformation_f(results), "worker_count": 1})))
+        run(go(MappingQueue({"callback_f": make_async_transformation_f(results), "worker_count": 1})))
         self.assertEqual(results, [5, 4, 3])
 
         self.assertRaises(ValueError, lambda: MappingQueue(
             {"callback_f": sync_transformation_f, "worker_count": 1}))
 
     def test_make_flattener(self):
-        loop = asyncio.get_event_loop()
-
         async def go(q):
             r = []
             await q.put([0, 1, 2, 3])
@@ -77,12 +76,10 @@ class MappingQueueTest(unittest.TestCase):
             await q.wait()
             return r
 
-        r = loop.run_until_complete(go(MappingQueue({"callback_f": flatten_callback})))
+        r = run(go(MappingQueue({"callback_f": flatten_callback})))
         self.assertEqual(r, list(range(8)))
 
     def test_make_pipe(self):
-        loop = asyncio.get_event_loop()
-
         async def map_f(x, q):
             await asyncio.sleep(x / 10.0)
             await q.put(x * x)
@@ -99,13 +96,11 @@ class MappingQueueTest(unittest.TestCase):
             await q.wait()
             return r
 
-        r = loop.run_until_complete(go(MappingQueue(dict(callback_f=map_f))))
+        r = run(go(MappingQueue(dict(callback_f=map_f))))
         r1 = sorted([_*_ for _ in range(4)] + [_ * _ for _ in range(3, 9)])
         self.assertEqual(r, r1)
 
     def test_make_simple_pipeline(self):
-        loop = asyncio.get_event_loop()
-
         q = MappingQueue(
             dict(callback_f=flatten_callback),
             dict(callback_f=flatten_callback),
@@ -126,12 +121,10 @@ class MappingQueueTest(unittest.TestCase):
             q.stop()
             await q.wait()
             return r
-        r = loop.run_until_complete(go(q))
+        r = run(go(q))
         self.assertEqual(r, [0, 0, 1, 0, 1, 1, 1, 1, 2, 0, 0, 1, 3, 1, 2, 0, 0, 0, 0, 7])
 
     def test_make_delayed_pipeline(self):
-        loop = asyncio.get_event_loop()
-
         def make_wait_index(idx):
 
             async def wait(item, q):
@@ -166,13 +159,11 @@ class MappingQueueTest(unittest.TestCase):
             q.stop()
             await q.wait()
             return r
-        r = loop.run_until_complete(go(TEST_CASE, q))
+        r = run(go(TEST_CASE, q))
         r1 = sorted(r, key=lambda x: sum(x))
         self.assertEqual(r, r1)
 
     def test_filter_pipeline(self):
-        loop = asyncio.get_event_loop()
-
         async def filter(item_list_of_lists, q):
             for l1 in item_list_of_lists:
                 for item in l1:
@@ -201,6 +192,6 @@ class MappingQueueTest(unittest.TestCase):
             q.stop()
             await q.wait()
             return r
-        r = loop.run_until_complete(go(TEST_CASE, q))
+        r = run(go(TEST_CASE, q))
         r1 = [7, 5, 1, 1, 1, 1, 1, 2, 1, 3, 1, 2]
         self.assertEqual(r, r1)
