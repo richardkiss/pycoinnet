@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import calendar
 import codecs
+import collections
 import datetime
 import logging
 import io
@@ -20,10 +21,11 @@ from pycoin.tx.tx_utils import create_tx
 from pycoin.wallet.SQLite3Persistence import SQLite3Persistence
 # from pycoin.wallet.SQLite3Wallet import SQLite3Wallet
 
-from pycoinnet.cmds.common import init_logging, peer_connect_pipeline
-
+from pycoinnet.blockcatchup import create_peer_to_block_pipe
 from pycoinnet.networks import MAINNET
 from pycoinnet.BlockChainView import BlockChainView
+
+from .common import init_logging, peer_connect_pipeline
 
 
 def storage_base_path():
@@ -39,6 +41,25 @@ class Keychain(object):
 
     def is_spendable_interesting(self, spendable):
         return spendable.bitcoin_address() in self.interested_addresses
+
+
+def bloom_filter_from_parameters(element_count, false_positive_probability, tweak=1):
+    filter_size = filter_size_required(element_count, false_positive_probability)
+    hash_function_count = hash_function_count_required(filter_size, element_count)
+    bloom_filter = BloomFilter(filter_size, hash_function_count=hash_function_count, tweak=1)
+    print("%d elements; filter size: %d bytes; %d hash functions" % (
+            element_count, filter_size, hash_function_count))
+    return bloom_filter
+
+
+def bloom_filter_for_addresses_spendables(addresses, spendables, false_positive_probability=0.0001):
+    element_count = len(addresses) + len(spendables)
+    bloom_filter = bloom_filter_from_parameters(element_count, false_positive_probability)
+    for a in addresses:
+        bloom_filter.add_address(a)
+    for s in spendables:
+        bloom_filter.add_spendable(s)
+    return bloom_filter
 
 
 async def wallet_fetch(path, args):
@@ -67,25 +88,9 @@ async def wallet_fetch(path, args):
 
     spendables = list()  # persistence.unspent_spendables(blockchain_view.last_block_index()))
 
-    element_count = len(addresses) + len(spendables)
-    false_positive_probability = 0.0000001
-
-    filter_size = filter_size_required(element_count, false_positive_probability)
-    hash_function_count = hash_function_count_required(filter_size, element_count)
-    bloom_filter = BloomFilter(filter_size, hash_function_count=hash_function_count, tweak=1)
-
-    print("%d elements; filter size: %d bytes; %d hash functions" % (
-            element_count, filter_size, hash_function_count))
-
-    for a in addresses:
-        bloom_filter.add_address(a)
-
-    for s in spendables:
-        bloom_filter.add_spendable(s)
+    bloom_filter = bloom_filter_for_addresses_spendables(addresses, spendables)
 
     # next: connect to a host
-
-    from pycoinnet.blockcatchup import create_peer_to_block_pipe
 
     def filter_f(bh, pri):
         return ITEM_TYPE_MERKLEBLOCK
@@ -93,13 +98,21 @@ async def wallet_fetch(path, args):
     peer_to_block_pipe = create_peer_to_block_pipe(blockchain_view, filter_f)
     peer_q = peer_connect_pipeline(args.network)
 
+    tx_future_cache = collections.defaultdict(asyncio.Future)
+
+    def cache_tx(peer, name, data):
+        tx = data["tx"]
+        tx_future_cache[tx.hash()].set_result(tx)
+
     for _ in range(3):
         peer = await peer_q.get()
         await peer_to_block_pipe.put(peer)
+        peer.set_request_callback("tx", cache_tx)
+        peer.start()
 
     while True:
         merkle_block, index = await peer_to_block_pipe.get()
-        import pdb; pdb.set_trace()
+        merkle_block.txs = [await tx_future_cache[tx_hash] for tx_hash in merkle_block.tx_hashes]
         wallet._add_block(merkle_block, index, merkle_block.txs)
         bcv_json = blockchain_view.as_json()
         persistence.set_global("blockchain_view", bcv_json)

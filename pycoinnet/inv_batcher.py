@@ -98,6 +98,8 @@ class InvBatcher:
 
     def handle_block_event(self, peer, name, data):
         item = data["block" if name == "block" else "header"]
+        if name == "merkleblock":
+            item.tx_hashes = data["tx_hashes"]
         self._handle_inv_response(ITEM_TYPE_BLOCK if name == "block" else ITEM_TYPE_MERKLEBLOCK, item)
 
     def handle_tx_event(self, peer, name, data):
