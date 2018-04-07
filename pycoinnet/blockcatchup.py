@@ -2,9 +2,7 @@ import asyncio
 import logging
 
 from pycoin.message.InvItem import InvItem, ITEM_TYPE_BLOCK
-
 from pycoinnet.MappingQueue import MappingQueue
-from pycoinnet.PeerEvent import PeerEvent
 
 from pycoinnet.inv_batcher import InvBatcher
 
@@ -24,7 +22,6 @@ def create_peer_to_block_pipe(bcv, filter_f=lambda block_hash, index: ITEM_TYPE_
     improve_headers_pipe = asyncio.Queue()
 
     async def note_peer(peer, q):
-        peer = PeerEvent(peer)
         peer.set_request_callback("ping", pong_callback)
         await inv_batcher.add_peer(peer)
         await q.put(peer)
@@ -33,7 +30,8 @@ def create_peer_to_block_pipe(bcv, filter_f=lambda block_hash, index: ITEM_TYPE_
         block_locator_hashes = bcv.block_locator_hashes()
         logging.debug("getting headers after %d", bcv.last_block_tuple()[0])
         data = await peer.request_response(
-            "getheaders", "headers", version=1, hashes=block_locator_hashes, hash_stop=bcv.hash_initial_block())
+            "getheaders", "headers", version=1,
+            hashes=block_locator_hashes, hash_stop=bcv.hash_initial_block())
         headers = [bh for bh, t in data["headers"]]
 
         if block_locator_hashes[-1] == bcv.hash_initial_block():
@@ -124,6 +122,7 @@ def main():
 
         for peer in peers:
             await peer_to_block_pipe.put(peer)
+            peer.start()
 
         while True:
             block, idx = await peer_to_block_pipe.get()

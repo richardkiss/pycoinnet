@@ -22,6 +22,10 @@ class Peer:
         self._pack_from_data = pack_from_data_f
         self._max_msg_size = max_msg_size
         self._msg_lock = asyncio.Lock()
+        # events
+        self._request_callbacks = dict()
+        self._response_futures = dict()
+        self._task = None
         # stats
         self._bytes_read = 0
         self._bytes_writ = 0
@@ -39,19 +43,18 @@ class Peer:
         self._bytes_writ += len(packet)
         self._writer.write(packet)
 
-    @asyncio.coroutine
-    def next_message(self, unpack_to_dict=True):
+    async def next_message(self, unpack_to_dict=True):
         header_size = len(self._magic_header)
-        with (yield from self._msg_lock):
+        with (await self._msg_lock):
             # read magic header
             reader = self._reader
-            blob = yield from reader.readexactly(header_size)
+            blob = await reader.readexactly(header_size)
             self._bytes_read += header_size
             if blob != self._magic_header:
                 raise ProtocolError("bad magic: got %s" % binascii.hexlify(blob))
 
             # read message name
-            message_size_hash_bytes = yield from reader.readexactly(20)
+            message_size_hash_bytes = await reader.readexactly(20)
             self._bytes_read += 20
             message_name_bytes = message_size_hash_bytes[:12]
             message_name = message_name_bytes.replace(b"\0", b"").decode("utf8")
@@ -64,7 +67,7 @@ class Peer:
 
             # read the hash, then the message
             transmitted_hash = message_size_hash_bytes[16:20]
-            message_data = yield from reader.readexactly(size)
+            message_data = await reader.readexactly(size)
             self._bytes_read += size
 
         # check the hash
@@ -77,19 +80,6 @@ class Peer:
             message_data = self._parse_from_data(message_name, message_data)
         return message_name, message_data
 
-    @asyncio.coroutine
-    def perform_handshake(self, **version_msg):
-        # "version"
-        self.send_msg("version", **version_msg)
-        msg, version_data = yield from self.next_message()
-        assert msg == 'version'
-
-        # "verack"
-        self.send_msg("verack")
-        msg, verack_data = yield from self.next_message()
-        assert msg == 'verack'
-        return version_data
-
     def write_eof(self):
         self._writer.write_eof()
 
@@ -101,6 +91,51 @@ class Peer:
 
     def peername(self):
         return self._reader._transport.get_extra_info("peername") or self._reader._transport
+
+    # events
+    async def perform_handshake(self, **version_msg):
+        """
+        Call this method to kick of event processing.
+        """
+        # "version"
+        self.send_msg("version", **version_msg)
+        msg, version_data = await self.next_message()
+        assert msg == 'version'
+
+        # "verack"
+        self.send_msg("verack")
+        msg, verack_data = await self.next_message()
+        assert msg == 'verack'
+
+        return version_data
+
+    def start(self):
+        if self._task is None:
+            self._task = asyncio.ensure_future(self.process_events())
+
+    async def request_response(self, request_message, response_message, **kwargs):
+        if response_message in self._request_callbacks:
+            await self._request_callbacks[response_message]
+        self._response_futures[response_message] = asyncio.Future()
+        self.send_msg(request_message, **kwargs)
+        return await self._response_futures[response_message]
+
+    def set_request_callback(self, name, callback_f):
+        self._request_callbacks[name] = callback_f
+
+    async def process_events(self):
+        while True:
+            event = await self.next_message()
+            if event is None:
+                break
+            name, data = event
+            if name in self._request_callbacks:
+                self._request_callbacks[name](self, name, data)
+            elif name in self._response_futures:
+                self._response_futures[name].set_result(data)
+                del self._response_futures[name]
+            else:
+                logging.error("unhandled event %s %s", event[0], event[1])
 
     def __repr__(self):
         return "<Peer %s>" % str(self.peername())
