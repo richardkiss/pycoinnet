@@ -45,10 +45,11 @@ def create_peer_to_block_pipe(bcv, filter_f=lambda block_hash, index: ITEM_TYPE_
         logging.debug("block header count is now %d", block_number)
         hashes = []
 
-        for idx in range(block_number, bcv.last_block_index()+1):
-            the_tuple = bcv.tuple_for_index(idx)
-            assert the_tuple[0] == idx
-            hashes.append(the_tuple[1])
+        for idx in range(bcv.last_block_index()+1-block_number):
+            the_tuple = bcv.tuple_for_index(idx+block_number)
+            assert the_tuple[0] == idx + block_number
+            assert headers[idx].hash() == the_tuple[1]
+            hashes.append(headers[idx])
         await q.put((block_number, hashes))
         await improve_headers_pipe.put(peer)
 
@@ -56,15 +57,15 @@ def create_peer_to_block_pipe(bcv, filter_f=lambda block_hash, index: ITEM_TYPE_
         if item is None:
             await q.put(None)
             return
-        first_block_index, block_hashes = item
-        logging.info("got %d new header(s) starting at %d" % (len(block_hashes), first_block_index))
-        block_hash_priority_pair_list = [(bh, first_block_index + _) for _, bh in enumerate(block_hashes)]
+        first_block_index, block_headers = item
+        logging.info("got %d new header(s) starting at %d" % (len(block_headers), first_block_index))
+        block_hash_priority_pair_list = [(bh, first_block_index + _) for _, bh in enumerate(block_headers)]
 
         for bh, pri in block_hash_priority_pair_list:
             item_type = filter_f(bh, pri)
             if not item_type:
                 continue
-            f = await inv_batcher.inv_item_to_future(InvItem(item_type, bh))
+            f = await inv_batcher.inv_item_to_future(InvItem(item_type, bh.hash()))
             await q.put((f, pri))
 
     async def wait_future(pair, q):
