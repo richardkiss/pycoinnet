@@ -19,8 +19,9 @@ from pycoinnet.Blockfetcher import Blockfetcher
 from pycoinnet.version import NODE_NETWORK
 
 from .common import (
-    init_logging, storage_base_path, get_current_view, save_bcv, install_pong_manager, peer_connect_pipeline
+    init_logging, storage_base_path, get_current_view, save_bcv, peer_connect_pipeline
 )
+from pycoinnet.pong_manager import install_pong_manager
 
 
 def flush_block_update(bcv, path, block_update):

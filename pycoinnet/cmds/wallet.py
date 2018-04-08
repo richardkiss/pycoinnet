@@ -21,9 +21,10 @@ from pycoin.tx.tx_utils import create_tx
 from pycoin.wallet.SQLite3Persistence import SQLite3Persistence
 # from pycoin.wallet.SQLite3Wallet import SQLite3Wallet
 
+from pycoinnet.BlockChainView import BlockChainView
 from pycoinnet.blockcatchup import create_peer_to_block_pipe
 from pycoinnet.networks import MAINNET
-from pycoinnet.BlockChainView import BlockChainView
+from pycoinnet.pong_manager import install_pong_manager
 
 from .common import init_logging, peer_connect_pipeline
 

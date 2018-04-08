@@ -8,7 +8,6 @@ list of available clients in a text file "addresses".
 import asyncio
 import logging
 import random
-import time
 
 from pycoinnet.MappingQueue import MappingQueue
 from pycoinnet.networks import MAINNET
@@ -101,6 +100,7 @@ async def keep_minimum_connections(network, min_connection_count=4):
     ]
     q = MappingQueue(*filters)
     await asyncio.sleep(60)
+    del q
 
 
 def main():

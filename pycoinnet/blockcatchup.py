@@ -7,10 +7,6 @@ from pycoinnet.MappingQueue import MappingQueue
 from pycoinnet.inv_batcher import InvBatcher
 
 
-def pong_callback(peer, name, data):
-    peer.send_msg("pong", nonce=data["nonce"])
-
-
 def create_peer_to_block_pipe(bcv, filter_f=lambda block_hash, index: ITEM_TYPE_BLOCK):
     """
     return a MappingQueue that accepts: peer objects
@@ -22,7 +18,6 @@ def create_peer_to_block_pipe(bcv, filter_f=lambda block_hash, index: ITEM_TYPE_
     improve_headers_pipe = asyncio.Queue()
 
     async def note_peer(peer, q):
-        peer.set_request_callback("ping", pong_callback)
         await inv_batcher.add_peer(peer)
         await q.put(peer)
 
@@ -84,54 +79,7 @@ def create_peer_to_block_pipe(bcv, filter_f=lambda block_hash, index: ITEM_TYPE_
         dict(callback_f=note_peer),
         dict(callback_f=improve_headers, worker_count=1, input_q=improve_headers_pipe),
         dict(callback_f=create_block_hash_entry, worker_count=1, input_q_maxsize=2),
-        dict(callback_f=wait_future)
+        dict(callback_f=wait_future, input_q_maxsize=1000)
     )
     peer_to_block_pipe.inv_batcher = inv_batcher
     return peer_to_block_pipe
-
-
-def main():
-    from pycoinnet.cmds.common import peer_connect_pipeline, init_logging
-    from pycoinnet.BlockChainView import BlockChainView
-    from pycoinnet.networks import MAINNET
-
-    async def go():
-        init_logging()
-        bcv = BlockChainView()
-
-        peers = []
-
-        if 1:
-            peer_q = peer_connect_pipeline(MAINNET, tcp_connect_workers=20)
-            peers.append(await peer_q.get())
-            #peer_q.cancel()
-            import pdb; pdb.set_trace()
-
-        if 1:
-            host_q = asyncio.Queue()
-            host_q.put_nowait(("192.168.1.99", 8333))
-            peer_q = peer_connect_pipeline(MAINNET, host_q=host_q)
-            peers.append(await peer_q.get())
-
-        def filter_f(bh, pri):
-            if pri < 20000 or pri > 30000:
-                return None
-            return ITEM_TYPE_BLOCK
-
-        peer_to_block_pipe = create_peer_to_block_pipe(bcv, filter_f)
-
-        for peer in peers:
-            await peer_to_block_pipe.put(peer)
-            peer.start()
-
-        while True:
-            block, idx = await peer_to_block_pipe.get()
-            if block is None:
-                break
-            print("%d : %s" % (idx, block))
-
-    asyncio.get_event_loop().run_until_complete(go())
-
-
-if __name__ == '__main__':
-    main()

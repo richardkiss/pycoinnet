@@ -8,11 +8,8 @@ from pycoinnet.networks import MAINNET, TESTNET
 from pycoinnet.cmds.common import init_logging, peer_connect_pipeline
 from pycoinnet.MappingQueue import MappingQueue
 from pycoinnet.inv_batcher import InvBatcher
+from pycoinnet.pong_manager import install_pong_manager
 from pycoinnet.version import NODE_NETWORK
-
-
-def pong_callback(peer, name, data):
-    peer.send_msg("pong", nonce=data["nonce"])
 
 
 async def set_up_inv_batcher(network, max_peer_count=8):
@@ -20,7 +17,7 @@ async def set_up_inv_batcher(network, max_peer_count=8):
 
     # add some peers to InvBatcher
     async def do_add_peer(peer, q):
-        peer.set_request_callback("ping", pong_callback)
+        install_pong_manager(peer)
         version = peer.version
         if version["services"] & NODE_NETWORK == 0:
             peer.close()

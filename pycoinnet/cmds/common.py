@@ -78,10 +78,3 @@ def save_bcv(path, bcv):
     with open(tmp, "w") as f:
         f.write(json)
     os.rename(tmp, path)
-
-
-def install_pong_manager(peer):
-    def handle_msg(name, data):
-        if name == 'ping':
-            peer.send_msg("pong", nonce=data["nonce"])
-    peer.add_msg_handler(handle_msg)
