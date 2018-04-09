@@ -22,6 +22,8 @@ from pycoin.wallet.SQLite3Persistence import SQLite3Persistence
 from pycoin.wallet.SQLite3Wallet import SQLite3Wallet
 
 from pycoinnet.BlockChainView import BlockChainView
+from pycoinnet.MappingQueue import MappingQueue
+
 from pycoinnet.blockcatchup import create_peer_to_block_pipe, improve_headers
 from pycoinnet.inv_batcher import InvBatcher
 from pycoinnet.networks import MAINNET
@@ -134,19 +136,45 @@ async def wallet_fetch(args):
     inv_batcher = InvBatcher()
     await inv_batcher.add_peer(peer)
 
-    while True:
-        last_header_block_index = blockchain_view.last_block_index()
-        if last_header_block_index < last_block_index + 2000:
+    logging.info("starting from %s", last_block_index)
+
+    async def do_improve_headers(peer, q):
+        while True:
             headers = await improve_headers(peer, blockchain_view, inv_batcher)
+
             block_number = blockchain_view.do_headers_improve_path(headers)
-            bcv_json = blockchain_view.as_json()
-            persistence.set_global("blockchain_view", bcv_json)
-            continue
-        last_block_index += 1
-        (index, block_hash, total_work) = blockchain_view.tuple_for_index(last_block_index)
-        f = await inv_batcher.inv_item_to_future(InvItem(ITEM_TYPE_MERKLEBLOCK, block_hash))
+            if block_number is False:
+                import pdb; pdb.set_trace()
+                await q.put(None)
+                import pdb; pdb.set_trace()
+                break
+
+            hashes = []
+
+            for idx in range(blockchain_view.last_block_index()+1-block_number):
+                the_tuple = blockchain_view.tuple_for_index(idx+block_number)
+                assert the_tuple[0] == idx + block_number
+                assert headers[idx].hash() == the_tuple[1]
+                bh = headers[idx]
+
+                if bh.timestamp >= early_timestamp:
+                    f = await inv_batcher.inv_item_to_future(InvItem(ITEM_TYPE_MERKLEBLOCK, bh.hash()))
+                    await q.put((idx+block_number, bh, f))
+                elif (idx + block_number) % 5000 == 0:
+                    logging.info("at block %06d (%s)" % (
+                        idx + block_number, datetime.datetime.fromtimestamp(bh.timestamp)))
+
+    final_q = asyncio.Queue(maxsize=100)
+    merkle_block_pipe = MappingQueue(
+        dict(callback_f=do_improve_headers, worker_count=1),
+        final_q=final_q
+    )
+    await merkle_block_pipe.put(peer)
+
+    while True:
+        index, bh, f = await final_q.get()
         merkle_block = await f
-        logging.debug("last_block_index = %s", last_block_index)
+        logging.debug("last_block_index = %s", index)
         if len(merkle_block.tx_futures) > 0:
             logging.info(
                 "got block %06d: %s... with %d transactions",
@@ -160,7 +188,7 @@ async def wallet_fetch(args):
 
 def wallet_balance(args):
     wallet, persistence, blockchain_view = wallet_persistence_for_args(args)
-    last_block = persistence.get_global("last_block_index")
+    last_block = int(persistence.get_global("block_index") or 0)
     total = 0
     for spendable in persistence.unspent_spendables(last_block, confirmations=1):
         total += spendable.coin_value
