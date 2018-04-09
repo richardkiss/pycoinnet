@@ -107,6 +107,7 @@ async def wallet_fetch(args):
         last_block_index = min(args.rewind, last_block_index)
 
     blockchain_view.rewind(last_block_index)
+    persistence.rewind_spendables(last_block_index)
 
     spendables = list(persistence.unspent_spendables(blockchain_view.last_block_index()))
 
@@ -174,7 +175,10 @@ async def wallet_fetch(args):
     await merkle_block_pipe.put(peer)
 
     while True:
-        index, bh, f = await final_q.get()
+        v = await final_q.get()
+        if v is None:
+            break
+        index, bh, f = v
         merkle_block = await f
         logging.debug("last_block_index = %s", index)
         if len(merkle_block.tx_futures) > 0:
