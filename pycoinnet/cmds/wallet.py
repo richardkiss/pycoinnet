@@ -15,14 +15,15 @@ import time
 from pycoin.bloomfilter import BloomFilter, filter_size_required, hash_function_count_required
 from pycoin.convention import satoshi_to_mbtc
 from pycoin.key.validate import is_address_valid
-from pycoin.message.InvItem import ITEM_TYPE_MERKLEBLOCK
+from pycoin.message.InvItem import ITEM_TYPE_MERKLEBLOCK, InvItem
 from pycoin.tx import Tx
 from pycoin.tx.tx_utils import create_tx
 from pycoin.wallet.SQLite3Persistence import SQLite3Persistence
 from pycoin.wallet.SQLite3Wallet import SQLite3Wallet
 
 from pycoinnet.BlockChainView import BlockChainView
-from pycoinnet.blockcatchup import create_peer_to_block_pipe
+from pycoinnet.blockcatchup import create_peer_to_block_pipe, improve_headers
+from pycoinnet.inv_batcher import InvBatcher
 from pycoinnet.networks import MAINNET
 from pycoinnet.pong_manager import install_pong_manager
 
@@ -80,11 +81,15 @@ def wallet_persistence_for_args(args):
 
 
 async def get_peers(args):
-    host_q = asyncio.Queue()
-    host_q.put_nowait((args.peer_address, args.peer_port))
-    peer_q = peer_connect_pipeline(args.network, host_q=host_q)
-    #return await peer_q.get()
-    return [await peer_q.get() for _ in range(1)]
+    from pycoinnet.Peer import Peer
+    from pycoinnet.version import version_data_for_peer
+    network = args.network
+    host, port = (args.peer_address, args.peer_port)
+    reader, writer = await asyncio.open_connection(host=host, port=port)
+    peer = Peer(reader, writer, network.magic_header, network.parse_from_data, network.pack_from_data)
+    version_data = version_data_for_peer(peer)
+    peer.version = await peer.perform_handshake(**version_data)
+    return [peer]
 
 
 async def wallet_fetch(args):
@@ -110,31 +115,46 @@ async def wallet_fetch(args):
             return ITEM_TYPE_MERKLEBLOCK
 
     filter_bytes, hash_function_count, tweak = bloom_filter.filter_load_params()
-    flags = 1  # BLOOM_UPDATE_ALL = 1  ## BRAIN DAMAGE
+    flags = 0  # BLOOM_UPDATE_ALL = 1  ## BRAIN DAMAGE
 
-    peer_to_block_pipe = create_peer_to_block_pipe(blockchain_view, filter_f)
+    #peer_to_block_pipe = create_peer_to_block_pipe(blockchain_view, filter_f)
 
     peers = await get_peers(args)
-
     for peer in peers:
         install_pong_manager(peer)
         peer.send_msg("filterload", filter=filter_bytes, tweak=tweak,
                       hash_function_count=hash_function_count, flags=flags)
-        await peer_to_block_pipe.put(peer)
         peer.start()
 
+    # for now, let's just do one peer
+
+    peer.set_request_callback("alert", lambda *args: None)
+
+    inv_batcher = InvBatcher()
+    await inv_batcher.add_peer(peer)
+
     while True:
-        merkle_block, index = await peer_to_block_pipe.get()
-        wallet._add_block(merkle_block, index, merkle_block.txs)
-        bcv_json = blockchain_view.as_json()
-        persistence.set_global("blockchain_view", bcv_json)
+        last_block_index = int(persistence.get_global("block_index") or 0)
+        last_header_block_index = blockchain_view.last_block_index()
+        if last_header_block_index < last_block_index + 2000:
+            headers = await improve_headers(peer, blockchain_view, inv_batcher)
+            block_number = blockchain_view.do_headers_improve_path(headers)
+            bcv_json = blockchain_view.as_json()
+            persistence.set_global("blockchain_view", bcv_json)
+            continue
+        last_block_index += 1
+        (index, block_hash, total_work) = blockchain_view.tuple_for_index(last_block_index)
+        f = await inv_batcher.inv_item_to_future(InvItem(ITEM_TYPE_MERKLEBLOCK, block_hash))
+        merkle_block = await f
+        logging.debug("last_block_index = %s", last_block_index)
         if len(merkle_block.txs) > 0:
-            print("got block %06d: %s... with %d transactions" % (
-                index, merkle_block.id()[:32], len(merkle_block.txs)))
+            logging.info(
+                "got block %06d: %s... with %d transactions",
+                index, merkle_block.id()[:32], len(merkle_block.txs))
+        wallet._add_block(merkle_block, index, merkle_block.txs)
         if index % 1000 == 0:
-            print("at block %06d (%s)" % (
-                    index, datetime.datetime.fromtimestamp(merkle_block.timestamp)))
-            last_block = persistence.set_global("last_block_index", index)
+            logging.info("at block %06d (%s)" % (
+                index, datetime.datetime.fromtimestamp(merkle_block.timestamp)))
             persistence.commit()
 
 

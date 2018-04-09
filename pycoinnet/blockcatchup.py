@@ -4,38 +4,35 @@ import logging
 from pycoin.message.InvItem import InvItem, ITEM_TYPE_BLOCK
 from pycoinnet.MappingQueue import MappingQueue
 
-from pycoinnet.inv_batcher import InvBatcher
+
+async def improve_headers(peer, bcv, inv_batcher):
+    block_locator_hashes = bcv.block_locator_hashes()
+    logging.debug("getting headers after %d", bcv.last_block_tuple()[0])
+    data = await peer.request_response(
+        "getheaders", "headers", version=1,
+        hashes=block_locator_hashes, hash_stop=bcv.hash_initial_block())
+    headers = [bh for bh, t in data["headers"]]
+
+    if block_locator_hashes[-1] == bcv.hash_initial_block():
+        # this hack is necessary because the stupid default client
+        # does not send the genesis block!
+        bh = headers[0].previous_block_hash
+        f = await inv_batcher.inv_item_to_future(InvItem(ITEM_TYPE_BLOCK, bh))
+        block = await f
+        headers = [block] + headers
+    return headers
 
 
-def create_peer_to_block_pipe(bcv, filter_f=lambda block_hash, index: ITEM_TYPE_BLOCK):
+def create_peer_to_block_pipe(bcv, inv_batcher, filter_f=lambda block_hash, index: ITEM_TYPE_BLOCK):
     """
     return a MappingQueue that accepts: peer objects
     and yields: block objects
     """
 
-    inv_batcher = InvBatcher()
-
     improve_headers_pipe = asyncio.Queue()
 
     async def note_peer(peer, q):
-        await inv_batcher.add_peer(peer)
-        await q.put(peer)
-
-    async def improve_headers(peer, q):
-        block_locator_hashes = bcv.block_locator_hashes()
-        logging.debug("getting headers after %d", bcv.last_block_tuple()[0])
-        data = await peer.request_response(
-            "getheaders", "headers", version=1,
-            hashes=block_locator_hashes, hash_stop=bcv.hash_initial_block())
-        headers = [bh for bh, t in data["headers"]]
-
-        if block_locator_hashes[-1] == bcv.hash_initial_block():
-            # this hack is necessary because the stupid default client
-            # does not send the genesis block!
-            bh = headers[0].previous_block_hash
-            f = await inv_batcher.inv_item_to_future(InvItem(ITEM_TYPE_BLOCK, bh))
-            block = await f
-            headers = [block] + headers
+        headers = await improve_headers(peer, bcv, inv_batcher)
 
         block_number = bcv.do_headers_improve_path(headers)
         if block_number is False:
@@ -77,8 +74,7 @@ def create_peer_to_block_pipe(bcv, filter_f=lambda block_hash, index: ITEM_TYPE_
         await q.put((block, index))
 
     peer_to_block_pipe = MappingQueue(
-        dict(callback_f=note_peer),
-        dict(callback_f=improve_headers, worker_count=1, input_q=improve_headers_pipe),
+        dict(callback_f=note_peer, worker_count=1, input_q=improve_headers_pipe),
         dict(callback_f=create_block_hash_entry, worker_count=1, input_q_maxsize=2),
         dict(callback_f=wait_future, input_q_maxsize=1000)
     )
