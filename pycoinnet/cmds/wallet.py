@@ -59,8 +59,8 @@ def bloom_filter_from_parameters(element_count, false_positive_probability, twea
     return bloom_filter
 
 
-def bloom_filter_for_addresses_spendables(addresses, spendables, false_positive_probability=0.0001):
-    element_count = len(addresses) + len(spendables)
+def bloom_filter_for_addresses_spendables(addresses, spendables, element_pad_count=0, false_positive_probability=0.000001):
+    element_count = len(addresses) + len(spendables) + element_pad_count
     bloom_filter = bloom_filter_from_parameters(element_count, false_positive_probability)
     for a in addresses:
         bloom_filter.add_address(a)
@@ -104,21 +104,20 @@ async def wallet_fetch(args):
 
     if args.rewind:
         print("rewinding to block %d" % args.rewind)
-        last_block_index = args.rewind
+        last_block_index = min(args.rewind, last_block_index)
 
     blockchain_view.rewind(last_block_index)
-    blockchain_view.winnow()
 
-    spendables = list()  # persistence.unspent_spendables(blockchain_view.last_block_index()))
+    spendables = list(persistence.unspent_spendables(blockchain_view.last_block_index()))
 
-    bloom_filter = bloom_filter_for_addresses_spendables(wallet.keychain.addresses(), spendables)
+    bloom_filter = bloom_filter_for_addresses_spendables(wallet.keychain.addresses(), spendables, element_pad_count=2000)
 
     def filter_f(bh, pri):
         if bh.timestamp >= early_timestamp:
             return ITEM_TYPE_MERKLEBLOCK
 
     filter_bytes, hash_function_count, tweak = bloom_filter.filter_load_params()
-    flags = 0  # BLOOM_UPDATE_ALL = 1  ## BRAIN DAMAGE
+    flags = 1  # BLOOM_UPDATE_ALL = 1  ## BRAIN DAMAGE
 
     #peer_to_block_pipe = create_peer_to_block_pipe(blockchain_view, filter_f)
 
@@ -163,6 +162,9 @@ async def wallet_fetch(args):
                 elif (idx + block_number) % 5000 == 0:
                     logging.info("at block %06d (%s)" % (
                         idx + block_number, datetime.datetime.fromtimestamp(bh.timestamp)))
+                    bcv_json = blockchain_view.as_json()
+                    persistence.set_global("blockchain_view", bcv_json)
+                    persistence.commit()
 
     final_q = asyncio.Queue(maxsize=100)
     merkle_block_pipe = MappingQueue(
@@ -179,10 +181,13 @@ async def wallet_fetch(args):
             logging.info(
                 "got block %06d: %s... with %d transactions",
                 index, merkle_block.id()[:32], len(merkle_block.tx_futures))
-        wallet._add_block(merkle_block, index, [await f for f in merkle_block.tx_futures])
+        txs = [await f for f in merkle_block.tx_futures]
+        wallet._add_block(merkle_block, index, txs)
         if index % 1000 == 0:
             logging.info("at block %06d (%s)" % (
                 index, datetime.datetime.fromtimestamp(merkle_block.timestamp)))
+            bcv_json = blockchain_view.as_json()
+            persistence.set_global("blockchain_view", bcv_json)
             persistence.commit()
 
 
