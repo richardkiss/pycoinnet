@@ -147,11 +147,11 @@ async def wallet_fetch(args):
         f = await inv_batcher.inv_item_to_future(InvItem(ITEM_TYPE_MERKLEBLOCK, block_hash))
         merkle_block = await f
         logging.debug("last_block_index = %s", last_block_index)
-        if len(merkle_block.txs) > 0:
+        if len(merkle_block.tx_futures) > 0:
             logging.info(
                 "got block %06d: %s... with %d transactions",
-                index, merkle_block.id()[:32], len(merkle_block.txs))
-        wallet._add_block(merkle_block, index, merkle_block.txs)
+                index, merkle_block.id()[:32], len(merkle_block.tx_futures))
+        wallet._add_block(merkle_block, index, [await f for f in merkle_block.tx_futures])
         if index % 1000 == 0:
             logging.info("at block %06d (%s)" % (
                 index, datetime.datetime.fromtimestamp(merkle_block.timestamp)))

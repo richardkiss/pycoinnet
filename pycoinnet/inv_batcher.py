@@ -116,13 +116,8 @@ class InvBatcher:
 
     def handle_merkle_block_event(self, peer, name, data):
         item = data["header"]
-        futures = [self.register_interest(InvItem(ITEM_TYPE_TX, tx_hash)) for tx_hash in data["tx_hashes"]]
-
-        async def collect_them():
-            item.txs = [await f for f in futures]
-            self._handle_inv_response(ITEM_TYPE_MERKLEBLOCK, item)
-
-        asyncio.get_event_loop().create_task(collect_them())
+        item.tx_futures = [self.register_interest(InvItem(ITEM_TYPE_TX, tx_hash)) for tx_hash in data["tx_hashes"]]
+        self._handle_inv_response(ITEM_TYPE_MERKLEBLOCK, item)
 
     def handle_tx_event(self, peer, name, data):
         item = data["tx"]
