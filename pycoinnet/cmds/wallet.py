@@ -81,6 +81,7 @@ def wallet_persistence_for_args(args):
 
 
 async def get_peers(args):
+    # for now, let's just do one peer
     from pycoinnet.Peer import Peer
     from pycoinnet.version import version_data_for_peer
     network = args.network
@@ -97,14 +98,14 @@ async def wallet_fetch(args):
 
     early_timestamp = calendar.timegm(args.date)
 
-    print(args.path)
-    print("wallet. Fetching.")
-
-    # get archived headers
+    last_block_index = int(persistence.get_global("block_index") or 0)
 
     if args.rewind:
         print("rewinding to block %d" % args.rewind)
-        blockchain_view.rewind(args.rewind)
+        last_block_index = args.rewind
+
+    blockchain_view.rewind(last_block_index)
+    blockchain_view.winnow()
 
     spendables = list()  # persistence.unspent_spendables(blockchain_view.last_block_index()))
 
@@ -126,15 +127,14 @@ async def wallet_fetch(args):
                       hash_function_count=hash_function_count, flags=flags)
         peer.start()
 
-    # for now, let's just do one peer
-
+    # ignore these messages
     peer.set_request_callback("alert", lambda *args: None)
+    peer.set_request_callback("addr", lambda *args: None)
 
     inv_batcher = InvBatcher()
     await inv_batcher.add_peer(peer)
 
     while True:
-        last_block_index = int(persistence.get_global("block_index") or 0)
         last_header_block_index = blockchain_view.last_block_index()
         if last_header_block_index < last_block_index + 2000:
             headers = await improve_headers(peer, blockchain_view, inv_batcher)
@@ -243,7 +243,7 @@ def create_parser():
     create_parser = subparsers.add_parser('create', help='Create transaction')
     create_parser.add_argument("-o", "--output", type=str, help="name of tx output file", required=True)
     create_parser.add_argument('payable', type=as_payable, nargs='+',
-                               help="payable: either a bitcoin address, or a address/amount combo")
+                               help="payable: either a bitcoin address, or an address/amount combo")
 
     exclude_parser = subparsers.add_parser('exclude', help="Exclude spendables from a given transaction")
     exclude_parser.add_argument('path_to_tx', help="path to transaction")
