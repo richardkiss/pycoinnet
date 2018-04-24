@@ -5,12 +5,14 @@ This bitcoin client does little more than try to keep an up-to-date
 list of available clients in a text file "addresses".
 """
 
+import argparse
 import asyncio
 import logging
 import random
 
+from pycoin.networks.registry import network_codes, network_for_netcode
+
 from pycoinnet.MappingQueue import MappingQueue
-from pycoinnet.networks import MAINNET
 
 from pycoinnet.cmds.common import (
     init_logging, peer_connect_pipeline
@@ -36,12 +38,7 @@ class AddressDB(object):
                     port = int(port)
                     addresses[(host, port)] = timestamp
         except Exception:
-            logging.error("can't open %s, using default", self.path)
-            for h in [
-                "bitseed.xf2.org", "dnsseed.bluematt.me",
-                "seed.bitcoin.sipa.be", "dnsseed.bitcoin.dashjr.org"
-            ]:
-                addresses[(h, 8333)] = 1
+            logging.error("can't open %s", self.path)
         return addresses
 
     def next_address(self):
@@ -99,13 +96,20 @@ async def keep_minimum_connections(network, min_connection_count=4):
         dict(callback_f=get_addresses, input_q=peer_q, worker_count=min_connection_count),
     ]
     q = MappingQueue(*filters)
-    await asyncio.sleep(60)
+    await asyncio.sleep(10)
     del q
 
 
 def main():
     init_logging()
-    asyncio.get_event_loop().run_until_complete(keep_minimum_connections(MAINNET))
+
+    parser = argparse.ArgumentParser(description="Fetch host IPs from network.")
+    parser.add_argument('-n', "--network", help='specify network', type=network_for_netcode,
+                        default=network_for_netcode("BTC"))
+
+    args = parser.parse_args()
+
+    asyncio.get_event_loop().run_until_complete(keep_minimum_connections(args.network))
 
 
 main()

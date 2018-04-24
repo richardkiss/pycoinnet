@@ -2,9 +2,9 @@ import argparse
 import asyncio
 
 from pycoin.message.InvItem import InvItem, ITEM_TYPE_BLOCK
+from pycoin.networks.registry import network_codes, network_for_netcode
 from pycoin.serialize import h2b_rev
 
-from pycoinnet.networks import MAINNET, TESTNET
 from pycoinnet.cmds.common import init_logging, peer_connect_pipeline
 from pycoinnet.MappingQueue import MappingQueue
 from pycoinnet.inv_batcher import InvBatcher
@@ -33,8 +33,8 @@ async def set_up_inv_batcher(network, max_peer_count=8):
     return inv_batcher
 
 
-async def get_blocks(args, network):
-    inv_batcher = await set_up_inv_batcher(network)
+async def get_blocks(args):
+    inv_batcher = await set_up_inv_batcher(args.network)
 
     block_futures = []
     for _ in args.id:
@@ -51,13 +51,13 @@ async def get_blocks(args, network):
 def main():
     init_logging()
     parser = argparse.ArgumentParser(description="Fetch a block by ID.")
+    parser.add_argument('-n', "--network", help='specify network', type=network_for_netcode,
+                        default=network_for_netcode("BTC"))
     parser.add_argument('id', nargs="+", help='Block ID as hex')
 
     args = parser.parse_args()
 
-    network = MAINNET
-
-    asyncio.get_event_loop().run_until_complete(get_blocks(args, network))
+    asyncio.get_event_loop().run_until_complete(get_blocks(args))
 
 
 if __name__ == '__main__':

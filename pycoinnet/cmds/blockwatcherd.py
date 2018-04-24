@@ -9,10 +9,10 @@ import asyncio
 import logging
 import os.path
 
+from pycoin.networks.registry import network_codes, network_for_netcode
 from pycoin.serialize import b2h_rev
 
 from pycoinnet.headerpipeline import improve_headers
-from pycoinnet.networks import MAINNET
 from pycoinnet.MappingQueue import MappingQueue
 
 from pycoinnet.Blockfetcher import Blockfetcher
@@ -97,6 +97,8 @@ async def fetch_blocks(bcv, network, path, max_batch_size=1000):
 def main():
     init_logging()
     parser = argparse.ArgumentParser(description="Watch Bitcoin network for new blocks.")
+    parser.add_argument('-n', "--network", help='specify network', type=network_for_netcode,
+                        default=network_for_netcode("BTC"))
     parser.add_argument('-p', "--path", help='The path to the wallet files.')
     parser.add_argument(
         '-f', "--fast-forward", type=int,
@@ -107,9 +109,8 @@ def main():
     path = os.path.join(args.path or storage_base_path(), "blockwatcherd.json")
 
     bcv = get_current_view(path)
-    network = MAINNET
 
-    asyncio.get_event_loop().run_until_complete(fetch_blocks(bcv, network, path))
+    asyncio.get_event_loop().run_until_complete(fetch_blocks(bcv, args.network, path))
 
     last_index, last_block_hash, total_work = bcv.last_block_tuple()
     print("last block index %d, hash %s" % (last_index, b2h_rev(last_block_hash)))

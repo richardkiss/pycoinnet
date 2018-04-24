@@ -9,10 +9,10 @@ import asyncio
 import logging
 import os.path
 
+from pycoin.networks.registry import network_codes, network_for_netcode
 from pycoin.serialize import b2h_rev
 
 from pycoinnet.headerpipeline import improve_headers
-from pycoinnet.networks import MAINNET
 from pycoinnet.MappingQueue import MappingQueue
 from pycoinnet.cmds.common import (
     init_logging, set_log_file, peer_connect_pipeline, storage_base_path, get_current_view, save_bcv
@@ -27,9 +27,10 @@ async def update_chain_state(network, bcv, count=3):
     update_q = asyncio.Queue()
 
     async def do_improve_headers(peer, q):
-        peer.start_dispatcher()
+        import pdb; pdb.set_trace()
+        peer.start()
         install_pong_manager(peer)
-        r = await improve_headers(peer, bcv, update_q)
+        await improve_headers(peer, bcv, update_q)
         await q.put(peer)
 
     filters = [
@@ -49,6 +50,8 @@ async def update_chain_state(network, bcv, count=3):
 def main():
     init_logging(level=logging.DEBUG, asyncio_debug=True)
     parser = argparse.ArgumentParser(description="Update chain state and print summary.")
+    parser.add_argument('-n', "--network", help='specify network', type=network_for_netcode,
+                        default=network_for_netcode("BTC"))
     parser.add_argument('-p', "--path", help='The path to the wallet files.')
     parser.add_argument('-l', "--log-file", help="Path to log file", default=None)
 
@@ -62,9 +65,7 @@ def main():
     last_index, last_block_hash, total_work = bcv.last_block_tuple()
     print("last block index %d, hash %s" % (last_index, b2h_rev(last_block_hash)))
 
-    network = MAINNET
-
-    asyncio.get_event_loop().run_until_complete(update_chain_state(network, bcv))
+    asyncio.get_event_loop().run_until_complete(update_chain_state(args.network, bcv))
     bcv.winnow()
     save_bcv(path, bcv)
     last_index, last_block_hash, total_work = bcv.last_block_tuple()

@@ -14,6 +14,7 @@ import time
 
 from pycoin.bloomfilter import BloomFilter, filter_size_required, hash_function_count_required
 from pycoin.convention import satoshi_to_mbtc
+from pycoin.encoding.b58 import a2b_hashed_base58
 from pycoin.ui.validate import is_address_valid
 from pycoin.networks.registry import network_codes, network_for_netcode
 from pycoin.message.InvItem import ITEM_TYPE_MERKLEBLOCK, InvItem
@@ -33,14 +34,19 @@ from .common import init_logging, peer_connect_pipeline
 
 
 class Keychain(object):
-    def __init__(self, addresses):
-        self.interested_addresses = set(addresses)
+    def __init__(self, hash160_set, persistence, network):
+        self._hash160_set = set(hash160_set)
+        self._persistence = persistence
+        self._network = network
 
     def is_spendable_interesting(self, spendable):
-        return spendable.bitcoin_address() in self.interested_addresses
+        for opcode, data, pc, new_pc in self._network.extras.ScriptTools.get_opcodes(spendable.script):
+            if data in self._hash160_set:
+                return True
+        return False
 
-    def addresses(self):
-        return self.interested_addresses
+    def hash160_set(self):
+        return self._hash160_set
 
 
 def bloom_filter_from_parameters(element_count, false_positive_probability, tweak=1):
@@ -56,7 +62,7 @@ def bloom_filter_for_addresses_spendables(addresses, spendables, element_pad_cou
     element_count = len(addresses) + len(spendables) + element_pad_count
     bloom_filter = bloom_filter_from_parameters(element_count, false_positive_probability)
     for a in addresses:
-        bloom_filter.add_address(a)
+        bloom_filter.add_hash160(a)
     for s in spendables:
         bloom_filter.add_spendable(s)
     return bloom_filter
@@ -70,8 +76,8 @@ def wallet_persistence_for_args(args):
     sql_db = sqlite3.Connection(os.path.join(basepath, "wallet.db"))
     persistence = SQLite3Persistence(sql_db)
 
-    addresses = [a[:-1] for a in open(os.path.join(basepath, "watch_addresses")).readlines()]
-    keychain = Keychain(addresses)
+    hash160_list = [a2b_hashed_base58(a[:-1])[1:] for a in open(os.path.join(basepath, "watch_addresses")).readlines()]
+    keychain = Keychain(hash160_list, persistence, args.network)
 
     wallet = SQLite3Wallet(keychain, persistence)
     bcv_json = persistence.get_global("blockchain_view") or "[]"
@@ -97,6 +103,12 @@ async def get_peer_pipeline(args):
     return peer_connect_pipeline(network, host_q=host_q)
 
 
+async def commit_to_persistence(blockchain_view, persistence):
+    bcv_json = await asyncio.get_event_loop().run_in_executor(None, blockchain_view.as_json)
+    persistence.set_global("blockchain_view", bcv_json)
+    persistence.commit()
+
+
 async def wallet_fetch(args):
     wallet, persistence, blockchain_view = wallet_persistence_for_args(args)
 
@@ -113,7 +125,7 @@ async def wallet_fetch(args):
 
     spendables = list(persistence.unspent_spendables(blockchain_view.last_block_index()))
 
-    bloom_filter = bloom_filter_for_addresses_spendables(wallet.keychain.addresses(), spendables, element_pad_count=2000)
+    bloom_filter = bloom_filter_for_addresses_spendables(wallet.keychain.hash160_set(), spendables, element_pad_count=2000)
 
     def filter_f(bh, pri):
         if bh.timestamp >= early_timestamp:
@@ -142,12 +154,11 @@ async def wallet_fetch(args):
     async def do_improve_headers(peer, q):
         while True:
             headers = await improve_headers(peer, blockchain_view, inv_batcher)
+            if len(headers) == 0:
+                break
 
             block_number = blockchain_view.do_headers_improve_path(headers)
             if block_number is False:
-                import pdb; pdb.set_trace()
-                await q.put(None)
-                import pdb; pdb.set_trace()
                 break
 
             hashes = []
@@ -164,9 +175,8 @@ async def wallet_fetch(args):
                 elif (idx + block_number) % 5000 == 0:
                     logging.info("at block %06d (%s)" % (
                         idx + block_number, datetime.datetime.fromtimestamp(bh.timestamp)))
-                    bcv_json = blockchain_view.as_json()
-                    persistence.set_global("blockchain_view", bcv_json)
-                    persistence.commit()
+                    await commit_to_persistence(blockchain_view, persistence)
+        await q.put(None)
 
     final_q = asyncio.Queue(maxsize=100)
     merkle_block_pipe = MappingQueue(
@@ -191,9 +201,9 @@ async def wallet_fetch(args):
         if index % 1000 == 0:
             logging.info("at block %06d (%s)" % (
                 index, datetime.datetime.fromtimestamp(merkle_block.timestamp)))
-            bcv_json = blockchain_view.as_json()
-            persistence.set_global("blockchain_view", bcv_json)
-            persistence.commit()
+            await commit_to_persistence(blockchain_view, persistence)
+    merkle_block_pipe.stop()
+    await commit_to_persistence(blockchain_view, persistence)
 
 
 def wallet_balance(args):
@@ -264,12 +274,10 @@ def wallet_exclude(args):
 
 
 def create_parser():
-    codes = network_codes()
-    MAINNET = network_for_netcode("BTC")
-
     parser = argparse.ArgumentParser(description="SPV wallet.")
     parser.add_argument('-p', "--path", help='The path to the wallet files.', default="~/.pycoin/wallet/default/")
-    parser.add_argument('-n', "--network", help='specify network', type=network_for_netcode, default=MAINNET)
+    parser.add_argument('-n', "--network", help='specify network', type=network_for_netcode,
+                        default=network_for_netcode("BTC"))
     subparsers = parser.add_subparsers(help="commands", dest='command')
 
     fetch_parser = subparsers.add_parser('fetch', help='Update to current blockchain view')
