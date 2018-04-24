@@ -38,6 +38,17 @@ def storage_base_path():
     return p
 
 
+def parser_and_packer_for_network(network):
+    # BRAIN DAMAGE
+    from pycoin.message.make_parser_and_packer import (
+        make_parser_and_packer, standard_messages,
+        standard_message_post_unpacks, standard_streamer, standard_parsing_functions
+    )
+
+    streamer = standard_streamer(standard_parsing_functions(network.block, network.tx))
+    return make_parser_and_packer(streamer, standard_messages(), standard_message_post_unpacks(streamer))
+
+
 def peer_connect_pipeline(network, tcp_connect_workers=30, handshake_workers=3, host_q=None, loop=None):
 
     host_q = host_q or dns_bootstrap_host_port_q(network)
@@ -51,7 +62,8 @@ def peer_connect_pipeline(network, tcp_connect_workers=30, handshake_workers=3, 
 
     async def do_peer_handshake(rw_tuple, q):
         reader, writer = rw_tuple
-        peer = Peer(reader, writer, network.magic_header, network.parse_from_data, network.pack_from_data)
+        parse_from_data, pack_from_data = parser_and_packer_for_network(network)
+        peer = Peer(reader, writer, network.magic_header, parse_from_data, pack_from_data)
         version_data = version_data_for_peer(peer)
         peer.version = await peer.perform_handshake(**version_data)
         await q.put(peer)

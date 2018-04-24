@@ -14,7 +14,8 @@ import time
 
 from pycoin.bloomfilter import BloomFilter, filter_size_required, hash_function_count_required
 from pycoin.convention import satoshi_to_mbtc
-from pycoin.key.validate import is_address_valid
+from pycoin.ui.validate import is_address_valid
+from pycoin.networks.registry import network_codes, network_for_netcode
 from pycoin.message.InvItem import ITEM_TYPE_MERKLEBLOCK, InvItem
 from pycoin.tx import Tx
 from pycoin.tx.tx_utils import create_tx
@@ -24,19 +25,11 @@ from pycoin.wallet.SQLite3Wallet import SQLite3Wallet
 from pycoinnet.BlockChainView import BlockChainView
 from pycoinnet.MappingQueue import MappingQueue
 
-from pycoinnet.blockcatchup import create_peer_to_block_pipe, improve_headers
+from pycoinnet.blockcatchup import improve_headers
 from pycoinnet.inv_batcher import InvBatcher
-from pycoinnet.networks import MAINNET
 from pycoinnet.pong_manager import install_pong_manager
 
 from .common import init_logging, peer_connect_pipeline
-
-
-def storage_base_path():
-    p = os.path.expanduser("~/.pycoin/wallet/default/")
-    if not os.path.exists(p):
-        os.makedirs(p)
-    return p
 
 
 class Keychain(object):
@@ -70,10 +63,14 @@ def bloom_filter_for_addresses_spendables(addresses, spendables, element_pad_cou
 
 
 def wallet_persistence_for_args(args):
-    sql_db = sqlite3.Connection(os.path.join(args.path, "wallet.db"))
+    basepath = os.path.join(os.path.expanduser(args.path), args.network.code)
+    if not os.path.exists(basepath):
+        os.makedirs(basepath)
+
+    sql_db = sqlite3.Connection(os.path.join(basepath, "wallet.db"))
     persistence = SQLite3Persistence(sql_db)
 
-    addresses = [a[:-1] for a in open(os.path.join(args.path, "watch_addresses")).readlines()]
+    addresses = [a[:-1] for a in open(os.path.join(basepath, "watch_addresses")).readlines()]
     keychain = Keychain(addresses)
 
     wallet = SQLite3Wallet(keychain, persistence)
@@ -82,17 +79,22 @@ def wallet_persistence_for_args(args):
     return wallet, persistence, bcv
 
 
-async def get_peers(args):
+async def get_peer_pipeline(args):
     # for now, let's just do one peer
     from pycoinnet.Peer import Peer
-    from pycoinnet.version import version_data_for_peer
     network = args.network
-    host, port = (args.peer_address, args.peer_port)
-    reader, writer = await asyncio.open_connection(host=host, port=port)
-    peer = Peer(reader, writer, network.magic_header, network.parse_from_data, network.pack_from_data)
-    version_data = version_data_for_peer(peer)
-    peer.version = await peer.perform_handshake(**version_data)
-    return [peer]
+    host_q = None
+    if args.peer:
+        host_q = asyncio.Queue()
+        for peer in args.peer:
+            if ":" in peer:
+                host, port = peer.split(":", 1)
+                port = int(port)
+            else:
+                host = peer
+                port = args.network.default_port
+            await host_q.put((host, port))
+    return peer_connect_pipeline(network, host_q=host_q)
 
 
 async def wallet_fetch(args):
@@ -107,7 +109,7 @@ async def wallet_fetch(args):
         last_block_index = min(args.rewind, last_block_index)
 
     blockchain_view.rewind(last_block_index)
-    persistence.rewind_spendables(last_block_index)
+    wallet.rewind(last_block_index)
 
     spendables = list(persistence.unspent_spendables(blockchain_view.last_block_index()))
 
@@ -120,9 +122,8 @@ async def wallet_fetch(args):
     filter_bytes, hash_function_count, tweak = bloom_filter.filter_load_params()
     flags = 1  # BLOOM_UPDATE_ALL = 1  ## BRAIN DAMAGE
 
-    #peer_to_block_pipe = create_peer_to_block_pipe(blockchain_view, filter_f)
-
-    peers = await get_peers(args)
+    peer_pipeline = await get_peer_pipeline(args)
+    peers = [await peer_pipeline.get() for _ in range(1)]  ## BRAIN DAMAGE
     for peer in peers:
         install_pong_manager(peer)
         peer.send_msg("filterload", filter=filter_bytes, tweak=tweak,
@@ -204,11 +205,11 @@ def wallet_balance(args):
     print("block %d: balance = %s mBTC" % (last_block, satoshi_to_mbtc(total)))
 
 
-def as_payable(payable):
+def as_payable(payable, network):
     address, amount = payable, None
     if "/" in payable:
         address, amount = payable.split("/", 1)
-    if not is_address_valid(address):
+    if not is_address_valid(address, allowable_netcodes=[network.code]):
         raise argparse.ArgumentTypeError("%s is not a valid address" % address)
     if amount is not None:
         return (address, int(amount))
@@ -222,7 +223,8 @@ def wallet_create(args):
 
     # how much are we sending?
     total_sending = 0
-    for p in args.payable:
+    payables = [as_payable(_, args.network) for _ in args.payable]
+    for p in payables:
         if len(p) == 2:
             total_sending += p[-1]
 
@@ -239,7 +241,7 @@ def wallet_create(args):
 
     print("found %d coins which exceed %d" % (total, total_sending))
 
-    tx = create_tx(spendables, args.payable)
+    tx = create_tx(spendables, payables)
     with open(args.output, "wb") as f:
         tx.stream(f)
         tx.stream_unspents(f)
@@ -262,8 +264,12 @@ def wallet_exclude(args):
 
 
 def create_parser():
+    codes = network_codes()
+    MAINNET = network_for_netcode("BTC")
+
     parser = argparse.ArgumentParser(description="SPV wallet.")
-    parser.add_argument('-p', "--path", help='The path to the wallet files.', default=storage_base_path())
+    parser.add_argument('-p', "--path", help='The path to the wallet files.', default="~/.pycoin/wallet/default/")
+    parser.add_argument('-n', "--network", help='specify network', type=network_for_netcode, default=MAINNET)
     subparsers = parser.add_subparsers(help="commands", dest='command')
 
     fetch_parser = subparsers.add_parser('fetch', help='Update to current blockchain view')
@@ -272,14 +278,13 @@ def create_parser():
                               default=time.strptime('2008-01-01', '%Y-%m-%d'))
 
     fetch_parser.add_argument('-r', "--rewind", help="Rewind to this block index.", type=int)
-    fetch_parser.add_argument("peer_address", help="Fetch from this peer.", type=str)
-    fetch_parser.add_argument("peer_port", help="Fetch from this peer port.", type=int, default=8333, nargs="?")
+    fetch_parser.add_argument("peer", metavar="peer_ip[:port]", help="Fetch from this peer.", type=str, nargs="?")
 
     subparsers.add_parser('balance', help='Show wallet balance')
 
     create_parser = subparsers.add_parser('create', help='Create transaction')
     create_parser.add_argument("-o", "--output", type=str, help="name of tx output file", required=True)
-    create_parser.add_argument('payable', type=as_payable, nargs='+',
+    create_parser.add_argument('payable', nargs='+',
                                help="payable: either a bitcoin address, or an address/amount combo")
 
     exclude_parser = subparsers.add_parser('exclude', help="Exclude spendables from a given transaction")
@@ -293,8 +298,6 @@ def main():
 
     args = parser.parse_args()
 
-    args.network = MAINNET  # BRAIN DAMAGE
-
     loop = asyncio.get_event_loop()
 
     if args.command == "fetch":
@@ -304,7 +307,7 @@ def main():
     if args.command == "create":
         wallet_create(args)
     if args.command == "exclude":
-        wallet_exclude(args.path, args)
+        wallet_exclude(args)
 
 
 if __name__ == '__main__':

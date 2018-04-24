@@ -1,1 +1,1 @@
-pycoin==0.80
+pycoin==0.90a0

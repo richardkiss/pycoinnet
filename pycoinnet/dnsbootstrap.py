@@ -16,7 +16,10 @@ def dns_bootstrap_host_port_q(network, getaddrinfo=asyncio.get_event_loop().geta
     hosts_seen = set()
 
     async def getaddr(dns_host, q):
-        responses = await getaddrinfo(dns_host, network.default_port)
+        try:
+            responses = await getaddrinfo(dns_host, network.default_port)
+        except Exception as ex:
+            return
         for response in responses:
             host = response[-1][:2]
             if host not in hosts_seen:

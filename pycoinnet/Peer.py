@@ -3,7 +3,7 @@ import binascii
 import logging
 import struct
 
-from pycoin import encoding
+from pycoin.encoding import hash
 
 
 class ProtocolError(Exception):
@@ -35,7 +35,7 @@ class Peer:
         message_type = message_name.encode("utf8")
         message_type_padded = (message_type+(b'\0'*12))[:12]
         message_size = struct.pack("<L", len(message_data))
-        message_checksum = encoding.double_sha256(message_data)[:4]
+        message_checksum = hash.double_sha256(message_data)[:4]
         packet = b"".join([
             self._magic_header, message_type_padded, message_size, message_checksum, message_data
         ])
@@ -71,7 +71,7 @@ class Peer:
             self._bytes_read += size
 
         # check the hash
-        actual_hash = encoding.double_sha256(message_data)[:4]
+        actual_hash = hash.double_sha256(message_data)[:4]
         if actual_hash != transmitted_hash:
             raise ProtocolError("checksum is WRONG: %s instead of %s" % (
                 binascii.hexlify(actual_hash), binascii.hexlify(transmitted_hash)))
