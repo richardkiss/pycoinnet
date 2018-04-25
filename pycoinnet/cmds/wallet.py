@@ -210,10 +210,11 @@ async def wallet_fetch(args):
 
 def wallet_balance(args):
     wallet, persistence, blockchain_view = wallet_persistence_for_args(args)
-    last_block = int(persistence.get_global("block_index") or 0)
+    last_block = args.block or int(persistence.get_global("block_index") or 0)
     total = 0
     for spendable in persistence.unspent_spendables(last_block, confirmations=1):
-        total += spendable.coin_value
+        if 0 < spendable.block_index_available <= last_block:
+            total += spendable.coin_value
     print("block %d: balance = %s mBTC" % (last_block, satoshi_to_mbtc(total)))
 
 
@@ -298,7 +299,8 @@ def create_parser():
     fetch_parser.add_argument('-r', "--rewind", help="Rewind to this block index.", type=int)
     fetch_parser.add_argument("peer", metavar="peer_ip[:port]", help="Fetch from this peer.", type=str, nargs="*")
 
-    subparsers.add_parser('balance', help='Show wallet balance')
+    balance_parser = subparsers.add_parser('balance', help='Show wallet balance')
+    balance_parser.add_argument("block", help="balance as of block", nargs="?", type=int)
 
     create_parser = subparsers.add_parser('create', help='Create transaction')
     create_parser.add_argument("-o", "--output", type=str, help="name of tx output file", required=True)
