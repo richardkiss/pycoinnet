@@ -87,7 +87,6 @@ def wallet_persistence_for_args(args):
 
 async def get_peer_pipeline(args):
     # for now, let's just do one peer
-    from pycoinnet.Peer import Peer
     network = args.network
     host_q = None
     if args.peer:
@@ -103,7 +102,9 @@ async def get_peer_pipeline(args):
     return peer_connect_pipeline(network, host_q=host_q)
 
 
-async def commit_to_persistence(blockchain_view, persistence):
+async def commit_to_persistence(blockchain_view, persistence, last_block=None):
+    if last_block:
+        blockchain_view.winnow(last_block)
     bcv_json = await asyncio.get_event_loop().run_in_executor(None, blockchain_view.as_json)
     persistence.set_global("blockchain_view", bcv_json)
     persistence.commit()
@@ -169,13 +170,15 @@ async def wallet_fetch(args):
                 assert headers[idx].hash() == the_tuple[1]
                 bh = headers[idx]
 
-                if bh.timestamp >= early_timestamp:
-                    f = await inv_batcher.inv_item_to_future(InvItem(ITEM_TYPE_MERKLEBLOCK, bh.hash()))
+                block_index = idx + block_number
+                the_type = filter_f(bh, block_index)
+                if the_type:
+                    f = await inv_batcher.inv_item_to_future(InvItem(the_type, bh.hash()))
                     await q.put((idx+block_number, bh, f))
-                elif (idx + block_number) % 5000 == 0:
+                if (block_index) % 5000 == 0:
                     logging.info("at block %06d (%s)" % (
                         idx + block_number, datetime.datetime.fromtimestamp(bh.timestamp)))
-                    await commit_to_persistence(blockchain_view, persistence)
+                    await commit_to_persistence(blockchain_view, persistence, block_number)
         await q.put(None)
 
     final_q = asyncio.Queue(maxsize=100)
@@ -201,7 +204,7 @@ async def wallet_fetch(args):
         if index % 1000 == 0:
             logging.info("at block %06d (%s)" % (
                 index, datetime.datetime.fromtimestamp(merkle_block.timestamp)))
-            await commit_to_persistence(blockchain_view, persistence)
+            await commit_to_persistence(blockchain_view, persistence, index)
     merkle_block_pipe.stop()
     await commit_to_persistence(blockchain_view, persistence)
 

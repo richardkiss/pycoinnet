@@ -117,11 +117,11 @@ class BlockChainView:
                 count = 2
         return s
 
-    def winnow(self):
+    def winnow(self, prior_to_block=None):
         """
         This method thins out the node_tuples using the "halfsies" method.
         """
-        halfsies_indices = self._halfsies_indices(self.last_block_index())
+        halfsies_indices = self._halfsies_indices(prior_to_block or self.last_block_index())
         old_node_tuples = self.node_tuples
         self._set_tuples(t for t in old_node_tuples if t[0] in halfsies_indices)
 

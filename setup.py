@@ -14,7 +14,7 @@ setup(
         "pycoinnet.cmds",
     ],
     entry_points={'console_scripts': [
-        'blockwatcher = pycoinnet.examples.blockwatcher:main',
+        'wallet = pycoinnet.cmds.wallet:main',
     ]},
     install_requires=REQUIREMENTS,
     author="Richard Kiss",

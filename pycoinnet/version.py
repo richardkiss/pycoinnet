@@ -55,7 +55,7 @@ def random_nonce_for_version():
 def version_data_for_peer(
         peer=None, remote_ip=None, remote_port=None, version=70001, local_ip="127.0.0.1", local_port=6111,
         last_block_index=0, nonce=None, subversion=b"/pycoinnet/", local_services=NODE_NONE,
-        remote_services=NODE_NONE, timestamp=None, relay=False):
+        remote_services=NODE_NONE, timestamp=None, relay=0):
     """This function helps to create the handshake "version" message."""
     if peer:
         peername = peer._reader._transport.get_extra_info('peername') or ("0.0.0.0", 0)

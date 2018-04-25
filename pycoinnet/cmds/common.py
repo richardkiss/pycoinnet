@@ -64,7 +64,7 @@ def peer_connect_pipeline(network, tcp_connect_workers=30, handshake_workers=3, 
         reader, writer = rw_tuple
         parse_from_data, pack_from_data = parser_and_packer_for_network(network)
         peer = Peer(reader, writer, network.magic_header, parse_from_data, pack_from_data)
-        version_data = version_data_for_peer(peer)
+        version_data = version_data_for_peer(peer, **version_dict)
         peer.version = await peer.perform_handshake(**version_data)
         await q.put(peer)
 
