@@ -46,10 +46,20 @@ def parser_and_packer_for_network(network):
     )
 
     streamer = standard_streamer(standard_parsing_functions(network.block, network.tx))
-    return make_parser_and_packer(streamer, standard_messages(), standard_message_post_unpacks(streamer))
+    parser, packer = make_parser_and_packer(streamer, standard_messages(), standard_message_post_unpacks(streamer))
+
+    def new_parser(message, data):
+        try:
+            return parser(message, data)
+        except KeyError:
+            logging.error("unknown message %s", message)
+            return b''
+
+    return new_parser, packer
 
 
-def peer_connect_pipeline(network, tcp_connect_workers=30, handshake_workers=3, host_q=None, loop=None):
+def peer_connect_pipeline(network, tcp_connect_workers=30, handshake_workers=3,
+                          host_q=None, loop=None, version_dict={}):
 
     host_q = host_q or dns_bootstrap_host_port_q(network)
 

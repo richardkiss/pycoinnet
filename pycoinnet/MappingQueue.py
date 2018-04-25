@@ -1,4 +1,5 @@
 import asyncio
+import logging
 
 
 def _add_stop(q):
@@ -30,7 +31,10 @@ def _make_repeated_f(input_q, callback_f, output_q):
                 [input_q._is_stopping_future, input_q_get], return_when=asyncio.FIRST_COMPLETED)
             if input_q_get.done():
                 item = input_q_get.result()
-                await callback_f(item, output_q)
+                try:
+                    await callback_f(item, output_q)
+                except Exception as ex:
+                    logging.exception("unhandled MappingQueue task exception")
                 input_q.task_done()
             else:
                 input_q_get.cancel()
