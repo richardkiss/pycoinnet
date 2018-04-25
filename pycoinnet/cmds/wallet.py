@@ -162,8 +162,6 @@ async def wallet_fetch(args):
             if block_number is False:
                 break
 
-            hashes = []
-
             for idx in range(blockchain_view.last_block_index()+1-block_number):
                 the_tuple = blockchain_view.tuple_for_index(idx+block_number)
                 assert the_tuple[0] == idx + block_number
@@ -178,7 +176,8 @@ async def wallet_fetch(args):
                 if (block_index) % 5000 == 0:
                     logging.info("at block %06d (%s)" % (
                         idx + block_number, datetime.datetime.fromtimestamp(bh.timestamp)))
-                    await commit_to_persistence(blockchain_view, persistence, block_number)
+                    await commit_to_persistence(blockchain_view, persistence)
+                    wallet.set_last_block_index(block_index)
         await q.put(None)
 
     final_q = asyncio.Queue(maxsize=100)
@@ -232,6 +231,8 @@ def as_payable(payable, network):
 def wallet_create(args):
     wallet, persistence, blockchain_view = wallet_persistence_for_args(args)
 
+    estimated_fee = 1000 or args.fee
+
     last_block = blockchain_view.last_block_index()
 
     # how much are we sending?
@@ -252,12 +253,18 @@ def wallet_create(args):
         if total >= total_sending:
             break
 
+    change_amount = total_input_value - estimated_fee - amount
+    if change_amount > 0:
+        change_address = self.keychain.get_change_address()
+        payables.append(change_address)
+
     print("found %d coins which exceed %d" % (total, total_sending))
 
     tx = create_tx(spendables, payables)
     with open(args.output, "wb") as f:
         tx.stream(f)
         tx.stream_unspents(f)
+    print("wrote transaction to %s" % args.output)
 
 
 def wallet_exclude(args):
@@ -289,7 +296,7 @@ def create_parser():
                               default=time.strptime('2008-01-01', '%Y-%m-%d'))
 
     fetch_parser.add_argument('-r', "--rewind", help="Rewind to this block index.", type=int)
-    fetch_parser.add_argument("peer", metavar="peer_ip[:port]", help="Fetch from this peer.", type=str, nargs="?")
+    fetch_parser.add_argument("peer", metavar="peer_ip[:port]", help="Fetch from this peer.", type=str, nargs="*")
 
     subparsers.add_parser('balance', help='Show wallet balance')
 
