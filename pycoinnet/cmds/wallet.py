@@ -4,7 +4,6 @@ import argparse
 import asyncio
 import calendar
 import codecs
-import collections
 import datetime
 import logging
 import io
@@ -16,10 +15,10 @@ from pycoin.bloomfilter import BloomFilter, filter_size_required, hash_function_
 from pycoin.convention import satoshi_to_mbtc
 from pycoin.encoding.b58 import a2b_hashed_base58
 from pycoin.ui.validate import is_address_valid
-from pycoin.networks.registry import network_codes, network_for_netcode
+from pycoin.networks.registry import network_for_netcode
 from pycoin.message.InvItem import ITEM_TYPE_MERKLEBLOCK, InvItem
 from pycoin.tx import Tx
-from pycoin.tx.tx_utils import create_tx
+from pycoin.tx.tx_utils import create_tx, distribute_from_split_pool
 from pycoin.wallet.SQLite3Persistence import SQLite3Persistence
 from pycoin.wallet.SQLite3Wallet import SQLite3Wallet
 
@@ -116,13 +115,6 @@ async def wallet_fetch(args):
     early_timestamp = calendar.timegm(args.date)
 
     last_block_index = int(persistence.get_global("block_index") or 0)
-
-    if args.rewind:
-        print("rewinding to block %d" % args.rewind)
-        last_block_index = min(args.rewind, last_block_index)
-
-    blockchain_view.rewind(last_block_index)
-    wallet.rewind(last_block_index)
 
     spendables = list(persistence.unspent_spendables(blockchain_view.last_block_index()))
 
@@ -222,17 +214,18 @@ def as_payable(payable, network):
     address, amount = payable, None
     if "/" in payable:
         address, amount = payable.split("/", 1)
+        amount = int(amount)
     if not is_address_valid(address, allowable_netcodes=[network.code]):
         raise argparse.ArgumentTypeError("%s is not a valid address" % address)
-    if amount is not None:
-        return (address, int(amount))
+    if amount:
+        return (address, amount)
     return address
 
 
 def wallet_create(args):
     wallet, persistence, blockchain_view = wallet_persistence_for_args(args)
 
-    estimated_fee = 1000 or args.fee
+    fee = args.fee
 
     last_block = blockchain_view.last_block_index()
 
@@ -246,22 +239,22 @@ def wallet_create(args):
     if total_sending == 0:
         raise argparse.ArgumentTypeError("you must choose a non-zero amount to send")
 
-    total = 0
+    total_input_value = 0
     spendables = []
     for spendable in persistence.unspent_spendables(last_block, confirmations=1):
         spendables.append(spendable)
-        total += spendable.coin_value
-        if total >= total_sending:
+        total_input_value += spendable.coin_value
+        if total_input_value >= total_sending:
             break
 
-    change_amount = total_input_value - estimated_fee - amount
-    if change_amount > 0:
-        change_address = self.keychain.get_change_address()
-        payables.append(change_address)
+    print("found %d coins which exceed %d" % (total_input_value, total_sending))
 
-    print("found %d coins which exceed %d" % (total, total_sending))
+    #change_amount = total_input_value - fee - total_sending
+    #if change_amount > 0:
+    #    change_address = keychain.get_change_address()
+    #    payables.append(change_address)
 
-    tx = create_tx(spendables, payables)
+    tx = create_tx(spendables, payables, network=args.network, fee=fee)
     with open(args.output, "wb") as f:
         tx.stream(f)
         tx.stream_unspents(f)
@@ -284,6 +277,28 @@ def wallet_exclude(args):
     persistence.commit()
 
 
+def wallet_rewind(args):
+    wallet, persistence, blockchain_view = wallet_persistence_for_args(args)
+
+    last_block_index = min(int(persistence.get_global("block_index") or 0), args.block_number)
+
+    blockchain_view.rewind(last_block_index)
+    wallet.rewind(last_block_index)
+
+    bcv_json = blockchain_view.as_json()
+    persistence.set_global("blockchain_view", bcv_json)
+    persistence.commit()
+    print("rewinding to block %d" % last_block_index)
+
+
+def wallet_dump(args):
+    wallet, persistence, blockchain_view = wallet_persistence_for_args(args)
+    lbi = wallet.last_block_index()
+
+    for spendable in persistence.unspent_spendables(lbi, confirmations=1):
+        print(spendable.as_text())
+
+
 def create_parser():
     parser = argparse.ArgumentParser(description="SPV wallet.")
     parser.add_argument('-p', "--path", help='The path to the wallet files.', default="~/.pycoin/wallet/default/")
@@ -296,7 +311,6 @@ def create_parser():
                               type=lambda x: time.strptime(x, '%Y-%m-%d'),
                               default=time.strptime('2008-01-01', '%Y-%m-%d'))
 
-    fetch_parser.add_argument('-r', "--rewind", help="Rewind to this block index.", type=int)
     fetch_parser.add_argument("peer", metavar="peer_ip[:port]", help="Fetch from this peer.", type=str, nargs="*")
 
     balance_parser = subparsers.add_parser('balance', help='Show wallet balance')
@@ -304,11 +318,18 @@ def create_parser():
 
     create_parser = subparsers.add_parser('create', help='Create transaction')
     create_parser.add_argument("-o", "--output", type=str, help="name of tx output file", required=True)
+    create_parser.add_argument("-F", "--fee", type=int, help="fee in satoshis", default=1000)
     create_parser.add_argument('payable', nargs='+',
                                help="payable: either a bitcoin address, or an address/amount combo")
 
     exclude_parser = subparsers.add_parser('exclude', help="Exclude spendables from a given transaction")
     exclude_parser.add_argument('path_to_tx', help="path to transaction")
+
+    rewind_parser = subparsers.add_parser('rewind', help="Rewind to a given block")
+    rewind_parser.add_argument('block_number', type=int, help="block number to rewind to")
+
+    dump_parser = subparsers.add_parser('dump', help="Dump spendables")
+
     return parser
 
 
@@ -328,6 +349,10 @@ def main():
         wallet_create(args)
     if args.command == "exclude":
         wallet_exclude(args)
+    if args.command == "rewind":
+        wallet_rewind(args)
+    if args.command == "dump":
+        wallet_dump(args)
 
 
 if __name__ == '__main__':
