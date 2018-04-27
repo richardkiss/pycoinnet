@@ -15,6 +15,7 @@ setup(
     ],
     entry_points={'console_scripts': [
         'wallet = pycoinnet.cmds.wallet:main',
+        'pushtx = pycoinnet.cmds.pushtx:main',
     ]},
     install_requires=REQUIREMENTS,
     author="Richard Kiss",
