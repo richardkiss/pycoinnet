@@ -2,7 +2,7 @@ import argparse
 import asyncio
 import logging
 
-from pycoin.message.InvItem import ITEM_TYPE_TX
+from pycoin.message.InvItem import InvItem, ITEM_TYPE_TX
 from pycoin.networks.registry import network_for_netcode
 
 from pycoinnet.cmds.common import init_logging, peer_connect_pipeline
@@ -18,11 +18,36 @@ async def delegater(network, pp1, pp2):
     peer_pipeline.stop()
 
 
+def install_ignore_manager(peer, also_ignore=[]):
+
+    def ignore(peer, name, data):
+        pass
+
+    for msg in "feefilter sendcmpct addr sendheaders".split() + also_ignore:
+        peer.set_request_callback(msg, ignore)
+
+
 async def sender(peer_pipeline, tx):
+
+    inv_item = InvItem(ITEM_TYPE_TX, tx.hash())
+
+    def handle_get_data(peer, name, data):
+        if inv_item in data["items"]:
+            logging.info("sending tx to %s", peer)
+            peer.send_msg("tx", tx=tx)
+
+    def handle_reject(peer, name, data):
+        logging.info("reject: %s 0x%x %s %s", data["message"], data["code"], data["reason"], data["data"])
+
     while 1:
         peer = await peer_pipeline.get()
-        peer.send_msg("tx", tx=tx)
-        peer.close()
+        install_pong_manager(peer)
+        install_ignore_manager(peer, ["inv"])
+        peer.set_request_callback("reject", handle_reject)
+        peer.set_request_callback("getdata", handle_get_data)
+        peer.start()
+        peer.send_msg("inv", items=[inv_item])
+        asyncio.get_event_loop().call_later(10, peer.close)
 
 
 async def receiver(peer_pipeline, tx, tx_future):
@@ -37,15 +62,11 @@ async def receiver(peer_pipeline, tx, tx_future):
                     logging.info("saw tx id %s at %s", item.data, peer)
                     tx_future.set_result(item)
 
-    def ignore(peer, name, data):
-        pass
-
     while not tx_future.done():
         peer = await peer_pipeline.get()
         install_pong_manager(peer)
+        install_ignore_manager(peer)
         peer.set_request_callback("inv", handle_inv)
-        for msg in "feefilter sendcmpct addr sendheaders".split():
-            peer.set_request_callback(msg, ignore)
         peer.send_msg("mempool")
         peer.start()
 

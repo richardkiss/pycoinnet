@@ -45,30 +45,33 @@ class Peer:
 
     async def next_message(self, unpack_to_dict=True):
         header_size = len(self._magic_header)
-        with (await self._msg_lock):
-            # read magic header
-            reader = self._reader
-            blob = await reader.readexactly(header_size)
-            self._bytes_read += header_size
-            if blob != self._magic_header:
-                raise ProtocolError("bad magic: got %s" % binascii.hexlify(blob))
+        try:
+            with (await self._msg_lock):
+                # read magic header
+                reader = self._reader
+                blob = await reader.readexactly(header_size)
+                self._bytes_read += header_size
+                if blob != self._magic_header:
+                    raise ProtocolError("bad magic: got %s" % binascii.hexlify(blob))
 
-            # read message name
-            message_size_hash_bytes = await reader.readexactly(20)
-            self._bytes_read += 20
-            message_name_bytes = message_size_hash_bytes[:12]
-            message_name = message_name_bytes.replace(b"\0", b"").decode("utf8")
+                # read message name
+                message_size_hash_bytes = await reader.readexactly(20)
+                self._bytes_read += 20
+                message_name_bytes = message_size_hash_bytes[:12]
+                message_name = message_name_bytes.replace(b"\0", b"").decode("utf8")
 
-            # get size of message
-            size_bytes = message_size_hash_bytes[12:16]
-            size = int.from_bytes(size_bytes, byteorder="little")
-            if size > self._max_msg_size:
-                raise ProtocolError("absurdly large message size %d" % size)
+                # get size of message
+                size_bytes = message_size_hash_bytes[12:16]
+                size = int.from_bytes(size_bytes, byteorder="little")
+                if size > self._max_msg_size:
+                    raise ProtocolError("absurdly large message size %d" % size)
 
-            # read the hash, then the message
-            transmitted_hash = message_size_hash_bytes[16:20]
-            message_data = await reader.readexactly(size)
-            self._bytes_read += size
+                # read the hash, then the message
+                transmitted_hash = message_size_hash_bytes[16:20]
+                message_data = await reader.readexactly(size)
+                self._bytes_read += size
+        except asyncio.streams.IncompleteReadError:
+            return None
 
         # check the hash
         actual_hash = hash.double_sha256(message_data)[:4]
@@ -99,13 +102,21 @@ class Peer:
         """
         # "version"
         self.send_msg("version", **version_msg)
-        msg, version_data = await self.next_message()
-        assert msg == 'version'
+        event = await self.next_message()
+        if event is None:
+            return None
+        msg, version_data = event
+        if msg != 'version':
+            return None
 
         # "verack"
         self.send_msg("verack")
-        msg, verack_data = await self.next_message()
-        assert msg == 'verack'
+        event = await self.next_message()
+        if event is None:
+            return None
+        msg, verack_data = event
+        if msg != 'verack':
+            return None
 
         return version_data
 

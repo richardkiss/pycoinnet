@@ -66,9 +66,12 @@ def peer_connect_pipeline(network, tcp_connect_workers=30, handshake_workers=3,
     async def do_tcp_connect(host_port_pair, q):
         host, port = host_port_pair
         logging.debug("TCP connecting to %s:%d", host, port)
-        reader, writer = await asyncio.open_connection(host=host, port=port)
-        logging.debug("TCP connected to %s:%d", host, port)
-        await q.put((reader, writer))
+        try:
+            reader, writer = await asyncio.open_connection(host=host, port=port)
+            logging.debug("TCP connected to %s:%d", host, port)
+            await q.put((reader, writer))
+        except Exception as ex:
+            logging.info("connect failed: %s:%d (%s)", host, port, ex)
 
     async def do_peer_handshake(rw_tuple, q):
         reader, writer = rw_tuple
@@ -76,7 +79,11 @@ def peer_connect_pipeline(network, tcp_connect_workers=30, handshake_workers=3,
         peer = Peer(reader, writer, network.magic_header, parse_from_data, pack_from_data)
         version_data = version_data_for_peer(peer, **version_dict)
         peer.version = await peer.perform_handshake(**version_data)
-        await q.put(peer)
+        if peer.version is None:
+            logging.info("handshake failed on %s", peer)
+            peer.close()
+        else:
+            await q.put(peer)
 
     filters = [
         dict(callback_f=do_tcp_connect, input_q=host_q, worker_count=tcp_connect_workers),
