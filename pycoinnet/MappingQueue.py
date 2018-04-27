@@ -35,7 +35,7 @@ def _make_repeated_f(input_q, callback_f, output_q):
                 item = input_q_get.result()
                 try:
                     await callback_f(item, output_q)
-                except concurrent.futures._base.CancelledError:
+                except CancelledError:
                     pass
                 except Exception as ex:
                     logging.exception("unhandled MappingQueue task exception")
@@ -139,6 +139,9 @@ class MappingQueue:
 
     async def get(self):
         return (await self._out_q.get())
+
+    def get_nowait(self):
+        return self._out_q.get_nowait()
 
     def empty(self):
         return self._out_q.empty()
