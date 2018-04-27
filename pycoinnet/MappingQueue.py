@@ -1,6 +1,8 @@
 import asyncio
 import logging
 
+from concurrent.futures import CancelledError
+
 
 def _add_stop(q):
 
@@ -33,6 +35,8 @@ def _make_repeated_f(input_q, callback_f, output_q):
                 item = input_q_get.result()
                 try:
                     await callback_f(item, output_q)
+                except concurrent.futures._base.CancelledError:
+                    pass
                 except Exception as ex:
                     logging.exception("unhandled MappingQueue task exception")
                 input_q.task_done()
