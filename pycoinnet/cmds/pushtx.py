@@ -9,8 +9,7 @@ from pycoinnet.cmds.common import init_logging, peer_connect_pipeline
 from pycoinnet.pong_manager import install_pong_manager
 
 
-async def delegater(network, pp1, pp2):
-    peer_pipeline = peer_connect_pipeline(network, version_dict=dict(version=70016))
+async def delegater(peer_pipeline, pp1, pp2):
     while 1:
         peer = await peer_pipeline.get()
         await pp1.put(peer)
@@ -27,7 +26,7 @@ def install_ignore_manager(peer, also_ignore=[]):
         peer.set_request_callback(msg, ignore)
 
 
-async def sender(peer_pipeline, tx):
+async def sender(peer_pipeline, tx, handle_addr):
 
     inv_item = InvItem(ITEM_TYPE_TX, tx.hash())
 
@@ -45,12 +44,14 @@ async def sender(peer_pipeline, tx):
         install_ignore_manager(peer, ["inv"])
         peer.set_request_callback("reject", handle_reject)
         peer.set_request_callback("getdata", handle_get_data)
+        peer.set_request_callback("addr", handle_addr)
+        peer.send_msg("getaddr")
         peer.start()
         peer.send_msg("inv", items=[inv_item])
         asyncio.get_event_loop().call_later(10, peer.close)
 
 
-async def receiver(peer_pipeline, tx, tx_future):
+async def receiver(peer_pipeline, tx, tx_future, handle_addr):
 
     tx_hash = tx.hash()
 
@@ -67,7 +68,10 @@ async def receiver(peer_pipeline, tx, tx_future):
         install_pong_manager(peer)
         install_ignore_manager(peer)
         peer.set_request_callback("inv", handle_inv)
+        peer.set_request_callback("addr", handle_addr)
+        peer.send_msg("feefilter", fee_filter_value=100)
         peer.send_msg("mempool")
+        peer.send_msg("getaddr")
         peer.start()
 
 
@@ -78,13 +82,24 @@ async def pushtx(args):
     pp1 = asyncio.Queue()
     pp2 = asyncio.Queue()
 
-    delegate_task = asyncio.ensure_future(delegater(network, pp1, pp2))
+    host_q = None
+    if args.peer:
+        host_q = asyncio.Queue()
+        await host_q.put((args.peer, args.network.default_port))
+    peer_pipeline = peer_connect_pipeline(args.network, host_q=host_q, version_dict=dict(version=70015))
 
-    send_task = asyncio.ensure_future(sender(pp1, tx))
+    delegate_task = asyncio.ensure_future(delegater(peer_pipeline, pp1, pp2))
+
+    def handle_addr(peer, name, data):
+        for pair in data["date_address_tuples"]:
+            tuple = (pair[1].host(), pair[1].port)
+            host_q.put_nowait(tuple)
+
+    send_task = asyncio.ensure_future(sender(pp1, tx, handle_addr))
 
     tx_future = asyncio.Future()
 
-    receive_task = asyncio.ensure_future(receiver(pp2, tx, tx_future))
+    receive_task = asyncio.ensure_future(receiver(pp2, tx, tx_future, handle_addr))
 
     r = await tx_future
     send_task.cancel()
@@ -97,6 +112,7 @@ def main():
     parser = argparse.ArgumentParser(description="Transmit a transaction to the network")
     parser.add_argument('-n', "--network", help='specify network', type=network_for_netcode,
                         default=network_for_netcode("BTC"))
+    parser.add_argument('-p', "--peer", help='initial peer', nargs="?")
     parser.add_argument('tx_hex', help='transaction hex')
 
     args = parser.parse_args()
