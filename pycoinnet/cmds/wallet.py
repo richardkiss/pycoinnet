@@ -67,13 +67,17 @@ def bloom_filter_for_addresses_spendables(addresses, spendables, element_pad_cou
     return bloom_filter
 
 
-def wallet_persistence_for_args(args):
+def basepath_persistence_for_args(args):
     basepath = os.path.join(os.path.expanduser(args.path), args.network.code)
     if not os.path.exists(basepath):
         os.makedirs(basepath)
 
     sql_db = sqlite3.Connection(os.path.join(basepath, "wallet.db"))
-    persistence = SQLite3Persistence(sql_db)
+    return basepath, SQLite3Persistence(sql_db)
+
+
+def wallet_persistence_for_args(args):
+    basepath, persistence = basepath_persistence_for_args(args)
 
     hash160_list = [a2b_hashed_base58(a[:-1])[1:] for a in open(os.path.join(basepath, "watch_addresses")).readlines()]
     keychain = Keychain(hash160_list, persistence, args.network)
@@ -98,7 +102,7 @@ async def get_peer_pipeline(args):
                 host = peer
                 port = args.network.default_port
             await host_q.put((host, port))
-    return peer_connect_pipeline(network, host_q=host_q)
+    return peer_connect_pipeline(network, host_q=host_q, version_dict=dict(version=70016))
 
 
 async def commit_to_persistence(blockchain_view, persistence, last_block=None):
@@ -128,7 +132,7 @@ async def wallet_fetch(args):
     flags = 1  # BLOOM_UPDATE_ALL = 1  ## BRAIN DAMAGE
 
     peer_pipeline = await get_peer_pipeline(args)
-    peers = [await peer_pipeline.get() for _ in range(1)]  ## BRAIN DAMAGE
+    peers = [await peer_pipeline.get()]  ## BRAIN DAMAGE
     for peer in peers:
         install_pong_manager(peer)
         peer.send_msg("filterload", filter=filter_bytes, tweak=tweak,
@@ -165,7 +169,7 @@ async def wallet_fetch(args):
                 if the_type:
                     f = await inv_batcher.inv_item_to_future(InvItem(the_type, bh.hash()))
                     await q.put((idx+block_number, bh, f))
-                if (block_index) % 5000 == 0:
+                elif (block_index) % 5000 == 0:
                     logging.info("at block %06d (%s)" % (
                         idx + block_number, datetime.datetime.fromtimestamp(bh.timestamp)))
                     await commit_to_persistence(blockchain_view, persistence)
@@ -201,7 +205,7 @@ async def wallet_fetch(args):
 
 
 def wallet_balance(args):
-    wallet, persistence, blockchain_view = wallet_persistence_for_args(args)
+    basepath, persistence = basepath_persistence_for_args(args)
     last_block = args.block or int(persistence.get_global("block_index") or 0)
     total = 0
     for spendable in persistence.unspent_spendables(last_block, confirmations=1):
