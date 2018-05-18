@@ -140,6 +140,8 @@ class BlockChainView:
 
         So you need to rewind to "new_start_idx" before applying the new blocks.
         """
+        if len(headers) == 0:
+            return False
         tuples = []
         if len(self.node_tuples) == 0:
             if headers[0].previous_block_hash != self.hash_initial_block():

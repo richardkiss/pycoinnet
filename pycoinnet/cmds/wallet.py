@@ -17,14 +17,14 @@ from pycoin.encoding.b58 import a2b_hashed_base58
 from pycoin.ui.validate import is_address_valid
 from pycoin.networks.registry import network_for_netcode
 from pycoin.message.InvItem import ITEM_TYPE_BLOCK, ITEM_TYPE_MERKLEBLOCK, InvItem
-from pycoin.tx.tx_utils import create_tx, distribute_from_split_pool
+from pycoin.tx.tx_utils import create_tx
 from pycoin.wallet.SQLite3Persistence import SQLite3Persistence
 from pycoin.wallet.SQLite3Wallet import SQLite3Wallet
 
 from pycoinnet.BlockChainView import BlockChainView
 from pycoinnet.MappingQueue import MappingQueue
 
-from pycoinnet.blockcatchup import improve_headers
+from pycoinnet.blockcatchup import improve_headers, create_peer_to_block_pipe
 from pycoinnet.inv_batcher import InvBatcher
 from pycoinnet.pong_manager import install_pong_manager
 
@@ -56,7 +56,8 @@ def bloom_filter_from_parameters(element_count, false_positive_probability, twea
     return bloom_filter
 
 
-def bloom_filter_for_addresses_spendables(addresses, spendables, element_pad_count=0, false_positive_probability=0.000001):
+def bloom_filter_for_addresses_spendables(
+        addresses, spendables, element_pad_count=0, false_positive_probability=0.000001):
     element_count = len(addresses) + len(spendables) + element_pad_count
     bloom_filter = bloom_filter_from_parameters(element_count, false_positive_probability)
     for a in addresses:
@@ -78,13 +79,22 @@ def basepath_persistence_for_args(args):
 def wallet_persistence_for_args(args):
     basepath, persistence = basepath_persistence_for_args(args)
 
-    hash160_list = [a2b_hashed_base58(a[:-1])[1:] for a in open(os.path.join(basepath, "watch_addresses")).readlines()]
+    hash160_list = [a2b_hashed_base58(a[:-1])[1:] for a in open(
+        os.path.join(basepath, "watch_addresses")).readlines()]
     keychain = Keychain(hash160_list, persistence, args.network)
 
     wallet = SQLite3Wallet(keychain, persistence)
     bcv_json = persistence.get_global("blockchain_view") or "[]"
     bcv = BlockChainView.from_json(bcv_json)
     return wallet, persistence, bcv
+
+
+async def commit_to_persistence(blockchain_view, persistence, last_block=None):
+    if last_block:
+        blockchain_view.winnow(last_block)
+    bcv_json = await asyncio.get_event_loop().run_in_executor(None, blockchain_view.as_json)
+    persistence.set_global("blockchain_view", bcv_json)
+    persistence.commit()
 
 
 async def get_peer_pipeline(args):
@@ -105,103 +115,66 @@ async def get_peer_pipeline(args):
     return peer_connect_pipeline(network, host_q=host_q, version_dict=dict(version=70016))
 
 
-async def commit_to_persistence(blockchain_view, persistence, last_block=None):
-    if last_block:
-        blockchain_view.winnow(last_block)
-    bcv_json = await asyncio.get_event_loop().run_in_executor(None, blockchain_view.as_json)
-    persistence.set_global("blockchain_view", bcv_json)
-    persistence.commit()
-
-
 async def wallet_fetch(args):
     wallet, persistence, blockchain_view = wallet_persistence_for_args(args)
-
-    early_timestamp = calendar.timegm(args.date)
-
-    last_block_index = int(persistence.get_global("block_index") or 0)
 
     spendables = list(persistence.unspent_spendables(blockchain_view.last_block_index()))
 
     bloom_filter = bloom_filter_for_addresses_spendables(
         wallet.keychain.hash160_set(), spendables, element_pad_count=2000)
 
+    early_timestamp = calendar.timegm(args.date)
+
     def filter_f(bh, pri):
         if bh.timestamp >= early_timestamp:
+            return ITEM_TYPE_BLOCK
             return ITEM_TYPE_MERKLEBLOCK
 
-    filter_bytes, hash_function_count, tweak = bloom_filter.filter_load_params()
-    flags = 1  # BLOOM_UPDATE_ALL = 1  ## BRAIN DAMAGE
+    inv_batcher = InvBatcher()
+
+    peer_to_block_pipe = create_peer_to_block_pipe(blockchain_view, inv_batcher, filter_f=filter_f)
 
     peer_pipeline = await get_peer_pipeline(args)
-    peers = [await peer_pipeline.get()]  ## BRAIN DAMAGE
+    peers = [await peer_pipeline.get()]  # BRAIN DAMAGE
+
+    filter_bytes, hash_function_count, tweak = bloom_filter.filter_load_params()
+    flags = 1  # BLOOM_UPDATE_ALL = 1  # BRAIN DAMAGE
+
     for peer in peers:
-        install_pong_manager(peer)
         peer.send_msg("filterload", filter=filter_bytes, tweak=tweak,
                       hash_function_count=hash_function_count, flags=flags)
+        # ignore these messages
+        peer.set_request_callback("alert", lambda *args: None)
+        peer.set_request_callback("addr", lambda *args: None)
+        peer.set_request_callback("inv", lambda *args: None)
+        await peer_to_block_pipe.put(peer)
+        await inv_batcher.add_peer(peer)
         peer.start()
 
-    # ignore these messages
-    peer.set_request_callback("alert", lambda *args: None)
-    peer.set_request_callback("addr", lambda *args: None)
-
-    inv_batcher = InvBatcher()
-    await inv_batcher.add_peer(peer)
-
-    logging.info("starting from %s", last_block_index)
-
-    async def do_improve_headers(peer, q):
-        while True:
-            headers = await improve_headers(peer, blockchain_view, inv_batcher)
-            if len(headers) == 0:
-                break
-
-            block_number = blockchain_view.do_headers_improve_path(headers)
-            if block_number is False:
-                break
-
-            for idx in range(blockchain_view.last_block_index()+1-block_number):
-                the_tuple = blockchain_view.tuple_for_index(idx+block_number)
-                assert the_tuple[0] == idx + block_number
-                assert headers[idx].hash() == the_tuple[1]
-                bh = headers[idx]
-
-                block_index = idx + block_number
-                the_type = filter_f(bh, block_index)
-                if the_type:
-                    f = await inv_batcher.inv_item_to_future(InvItem(the_type, bh.hash()))
-                    await q.put((idx+block_number, bh, f))
-                elif (block_index) % 5000 == 0:
-                    logging.info("at block %06d (%s)" % (
-                        idx + block_number, datetime.datetime.fromtimestamp(bh.timestamp)))
-                    await commit_to_persistence(blockchain_view, persistence)
-                    wallet.set_last_block_index(block_index)
-        await q.put(None)
-
-    final_q = asyncio.Queue(maxsize=100)
-    merkle_block_pipe = MappingQueue(
-        dict(callback_f=do_improve_headers, worker_count=1),
-        final_q=final_q
-    )
-    await merkle_block_pipe.put(peer)
-
     while True:
-        v = await final_q.get()
+        v = await peer_to_block_pipe.get()
         if v is None:
             break
-        index, bh, f = v
-        merkle_block = await f
-        logging.debug("last_block_index = %s", index)
-        if len(merkle_block.tx_futures) > 0:
+        block, index = v
+        logging.debug("last_block_index = %s (%s)", index,
+                      datetime.datetime.fromtimestamp(block.timestamp))
+        if hasattr(block, "tx_futures"):
+            txs = []
+            for f in block.tx_futures:
+                txs.append(await f)
+        else:
+            txs = block.txs
+        if len(txs) > 0:
             logging.info(
                 "got block %06d: %s... with %d transactions",
-                index, merkle_block.id()[:32], len(merkle_block.tx_futures))
-        txs = [await f for f in merkle_block.tx_futures]
-        wallet._add_block(merkle_block, index, txs)
-        if index % 1000 == 0:
+                index, block.id()[:32], len(txs))
+        wallet._add_block(block, index, txs)
+        if index % 50 == 0:
             logging.info("at block %06d (%s)" % (
-                index, datetime.datetime.fromtimestamp(merkle_block.timestamp)))
+                index, datetime.datetime.fromtimestamp(block.timestamp)))
+            wallet.set_last_block_index(index)
             await commit_to_persistence(blockchain_view, persistence, index)
-    merkle_block_pipe.stop()
+    peer_to_block_pipe.stop()
     await commit_to_persistence(blockchain_view, persistence)
 
 
@@ -227,7 +200,7 @@ def as_payable(payable, network):
     return address
 
 
-def wallet_create(args):
+def wallet_tx(args):
     wallet, persistence, blockchain_view = wallet_persistence_for_args(args)
 
     fee = args.fee
@@ -320,12 +293,13 @@ def create_parser():
                               type=lambda x: time.strptime(x, '%Y-%m-%d'),
                               default=time.strptime('2008-01-01', '%Y-%m-%d'))
 
-    fetch_parser.add_argument("peer", metavar="peer_ip[:port]", help="Fetch from this peer.", type=str, nargs="*")
+    fetch_parser.add_argument(
+        "peer", metavar="peer_ip[:port]", help="Fetch from this peer.", type=str, nargs="*")
 
     balance_parser = subparsers.add_parser('balance', help='Show wallet balance')
     balance_parser.add_argument("block", help="balance as of block", nargs="?", type=int)
 
-    create_parser = subparsers.add_parser('create', help='Create transaction')
+    create_parser = subparsers.add_parser('tx', help='Create transaction')
     create_parser.add_argument("-o", "--output", type=str, help="name of tx output file", required=True)
     create_parser.add_argument("-F", "--fee", type=int, help="fee in satoshis", default=1000)
     create_parser.add_argument('payable', nargs='+',
@@ -337,7 +311,7 @@ def create_parser():
     rewind_parser = subparsers.add_parser('rewind', help="Rewind to a given block")
     rewind_parser.add_argument('block_number', type=int, help="block number to rewind to")
 
-    dump_parser = subparsers.add_parser('dump', help="Dump spendables")
+    subparsers.add_parser('dump', help="Dump spendables")
 
     return parser
 
@@ -354,8 +328,8 @@ def main():
         loop.run_until_complete(wallet_fetch(args))
     if args.command == "balance":
         wallet_balance(args)
-    if args.command == "create":
-        wallet_create(args)
+    if args.command == "tx":
+        wallet_tx(args)
     if args.command == "exclude":
         wallet_exclude(args)
     if args.command == "rewind":

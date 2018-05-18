@@ -76,7 +76,8 @@ def create_peer_to_block_pipe(bcv, inv_batcher, filter_f=lambda block_hash, inde
     peer_to_block_pipe = MappingQueue(
         dict(callback_f=note_peer, worker_count=1, input_q=improve_headers_pipe),
         dict(callback_f=create_block_hash_entry, worker_count=1, input_q_maxsize=2),
-        dict(callback_f=wait_future, input_q_maxsize=1000)
+        dict(callback_f=wait_future, input_q_maxsize=1000),
+        final_q=asyncio.Queue(maxsize=100)
     )
     peer_to_block_pipe.inv_batcher = inv_batcher
     return peer_to_block_pipe
