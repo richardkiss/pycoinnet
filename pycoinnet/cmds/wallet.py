@@ -118,7 +118,11 @@ async def get_peer_pipeline(args):
 async def wallet_fetch(args):
     wallet, persistence, blockchain_view = wallet_persistence_for_args(args)
 
-    spendables = list(persistence.unspent_spendables(blockchain_view.last_block_index()))
+    last_block = wallet.last_block_index()
+    blockchain_view.rewind(last_block)
+    wallet.rewind(last_block)
+
+    spendables = list(persistence.unspent_spendables(last_block))
 
     bloom_filter = bloom_filter_for_addresses_spendables(
         wallet.keychain.hash160_set(), spendables, element_pad_count=2000)
