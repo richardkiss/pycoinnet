@@ -6,6 +6,7 @@ from pycoin.message.InvItem import InvItem, ITEM_TYPE_TX
 from pycoin.networks.registry import network_for_netcode
 
 from pycoinnet.cmds.common import init_logging, peer_connect_pipeline
+from pycoinnet.dnsbootstrap import dns_bootstrap_host_port_q
 from pycoinnet.pong_manager import install_pong_manager
 
 
@@ -73,19 +74,25 @@ async def receiver(peer_pipeline, tx, tx_future, handle_addr):
         peer.send_msg("mempool")
         peer.send_msg("getaddr")
         peer.start()
+        asyncio.get_event_loop().call_later(120, peer.close)
 
 
 async def pushtx(args):
     network = args.network
-    tx = network.tx.from_hex(args.tx_hex)
+    tx_info = args.tx
+    try:
+        tx = network.tx.parse(open(tx_info, "rb"))
+    except Exception:
+        tx = network.tx.from_hex(tx_info)
 
     pp1 = asyncio.Queue()
     pp2 = asyncio.Queue()
 
-    host_q = None
     if args.peer:
         host_q = asyncio.Queue()
         await host_q.put((args.peer, args.network.default_port))
+    else:
+        host_q = dns_bootstrap_host_port_q(network)
     peer_pipeline = peer_connect_pipeline(args.network, host_q=host_q, version_dict=dict(version=70015))
 
     delegate_task = asyncio.ensure_future(delegater(peer_pipeline, pp1, pp2))
@@ -113,7 +120,7 @@ def main():
     parser.add_argument('-n', "--network", help='specify network', type=network_for_netcode,
                         default=network_for_netcode("BTC"))
     parser.add_argument('-p', "--peer", help='initial peer', nargs="?")
-    parser.add_argument('tx_hex', help='transaction hex')
+    parser.add_argument('tx', help='transaction hex or tx file')
 
     args = parser.parse_args()
 
