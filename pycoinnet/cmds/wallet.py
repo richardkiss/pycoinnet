@@ -16,8 +16,7 @@ from pycoin.convention import satoshi_to_mbtc
 from pycoin.encoding.b58 import a2b_hashed_base58
 from pycoin.ui.validate import is_address_valid
 from pycoin.networks.registry import network_for_netcode
-from pycoin.message.InvItem import ITEM_TYPE_MERKLEBLOCK, InvItem
-from pycoin.tx import Tx
+from pycoin.message.InvItem import ITEM_TYPE_BLOCK, ITEM_TYPE_MERKLEBLOCK, InvItem
 from pycoin.tx.tx_utils import create_tx, distribute_from_split_pool
 from pycoin.wallet.SQLite3Persistence import SQLite3Persistence
 from pycoin.wallet.SQLite3Wallet import SQLite3Wallet
@@ -68,7 +67,7 @@ def bloom_filter_for_addresses_spendables(addresses, spendables, element_pad_cou
 
 
 def basepath_persistence_for_args(args):
-    basepath = os.path.join(os.path.expanduser(args.path), args.network.code)
+    basepath = os.path.join(os.path.expanduser(args.path), args.wallet_name, args.network.code)
     if not os.path.exists(basepath):
         os.makedirs(basepath)
 
@@ -102,6 +101,7 @@ async def get_peer_pipeline(args):
                 host = peer
                 port = args.network.default_port
             await host_q.put((host, port))
+    # BRAIN DAMAGE: 70016 version number is required for bgold new block header format
     return peer_connect_pipeline(network, host_q=host_q, version_dict=dict(version=70016))
 
 
@@ -122,7 +122,8 @@ async def wallet_fetch(args):
 
     spendables = list(persistence.unspent_spendables(blockchain_view.last_block_index()))
 
-    bloom_filter = bloom_filter_for_addresses_spendables(wallet.keychain.hash160_set(), spendables, element_pad_count=2000)
+    bloom_filter = bloom_filter_for_addresses_spendables(
+        wallet.keychain.hash160_set(), spendables, element_pad_count=2000)
 
     def filter_f(bh, pri):
         if bh.timestamp >= early_timestamp:
@@ -245,7 +246,9 @@ def wallet_create(args):
 
     total_input_value = 0
     spendables = []
-    for spendable in persistence.unspent_spendables(last_block, confirmations=1):
+    unspents = persistence.unspent_spendables(last_block, confirmations=1)
+
+    for spendable in unspents:
         spendables.append(spendable)
         total_input_value += spendable.coin_value
         if total_input_value >= total_sending:
@@ -266,12 +269,12 @@ def wallet_create(args):
 
 
 def wallet_exclude(args):
-    wallet, persistence, blockchain_view = wallet_persistence_for_args(args)
+    basepath, persistence = basepath_persistence_for_args(args)
 
     with open(args.path_to_tx, "rb") as f:
         if f.name.endswith("hex"):
             f = io.BytesIO(codecs.getreader("hex_codec")(f).read())
-        tx = Tx.parse(f)
+        tx = args.network.tx.parse(f)
 
     for tx_in in tx.txs_in:
         spendable = persistence.spendable_for_hash_index(tx_in.previous_hash, tx_in.previous_index)
@@ -300,14 +303,16 @@ def wallet_dump(args):
     lbi = wallet.last_block_index()
 
     for spendable in persistence.unspent_spendables(lbi, confirmations=1):
-        print(spendable.as_text())
+        if spendable.block_index_available != 0:
+            print(spendable.as_text())
 
 
 def create_parser():
     parser = argparse.ArgumentParser(description="SPV wallet.")
-    parser.add_argument('-p', "--path", help='The path to the wallet files.', default="~/.pycoin/wallet/default/")
+    parser.add_argument('-p', "--path", help='The path to the wallet files.', default="~/.pycoin/wallet/")
     parser.add_argument('-n', "--network", help='specify network', type=network_for_netcode,
                         default=network_for_netcode("BTC"))
+    parser.add_argument('-w', '--wallet_name', help='The name of the wallet.', default="default")
     subparsers = parser.add_subparsers(help="commands", dest='command')
 
     fetch_parser = subparsers.add_parser('fetch', help='Update to current blockchain view')
