@@ -26,9 +26,7 @@ from pycoin.wallet.SQLite3Wallet import SQLite3Wallet
 
 from pycoinnet.BlockChainView import BlockChainView
 
-from pycoinnet.blockcatchup import create_peer_to_block_pipe, peer_connect_pipeline
-from pycoinnet.inv_batcher import InvBatcher
-from pycoinnet.pong_manager import install_pong_manager
+from pycoinnet.blockcatchup import fetch_blocks_after
 
 from .common import init_logging
 
@@ -91,33 +89,15 @@ def wallet_persistence_for_args(args):
     return wallet, persistence, bcv
 
 
-async def commit_to_persistence(blockchain_view, persistence, last_block=None):
+def commit_to_persistence(blockchain_view, persistence, last_block=None):
     if last_block:
         blockchain_view.winnow(last_block)
-    bcv_json = await asyncio.get_event_loop().run_in_executor(None, blockchain_view.as_json)
+    bcv_json = blockchain_view.as_json()
     persistence.set_global("blockchain_view", bcv_json)
     persistence.commit()
 
 
-async def get_peer_pipeline(args):
-    # for now, let's just do one peer
-    network = args.network
-    host_q = None
-    if args.peer:
-        host_q = asyncio.Queue()
-        for peer in args.peer:
-            if ":" in peer:
-                host, port = peer.split(":", 1)
-                port = int(port)
-            else:
-                host = peer
-                port = args.network.default_port
-            await host_q.put((host, port))
-    # BRAIN DAMAGE: 70016 version number is required for bgold new block header format
-    return peer_connect_pipeline(network, host_q=host_q, version_dict=dict(version=70016))
-
-
-async def wallet_fetch(args):
+def wallet_fetch(args):
     wallet, persistence, blockchain_view = wallet_persistence_for_args(args)
 
     last_block = wallet.last_block_index()
@@ -136,41 +116,21 @@ async def wallet_fetch(args):
             return ITEM_TYPE_BLOCK
             return ITEM_TYPE_MERKLEBLOCK
 
-    inv_batcher = InvBatcher()
-
-    peer_to_block_pipe = create_peer_to_block_pipe(blockchain_view, inv_batcher, filter_f=filter_f)
-
-    peer_pipeline = await get_peer_pipeline(args)
-    peers = [await peer_pipeline.get()]  # BRAIN DAMAGE
-
     filter_bytes, hash_function_count, tweak = bloom_filter.filter_load_params()
     flags = 1  # BLOOM_UPDATE_ALL = 1  # BRAIN DAMAGE
 
-    for peer in peers:
+    async def new_peer_callback(peer):
         peer.send_msg("filterload", filter=filter_bytes, tweak=tweak,
                       hash_function_count=hash_function_count, flags=flags)
-        # ignore these messages
-        peer.set_request_callback("alert", lambda *args: None)
-        peer.set_request_callback("addr", lambda *args: None)
-        peer.set_request_callback("inv", lambda *args: None)
-        await peer_to_block_pipe.put(peer)
-        await inv_batcher.add_peer(peer)
-        install_pong_manager(peer)
-        peer.start()
 
-    while True:
-        v = await peer_to_block_pipe.get()
-        if v is None:
-            break
-        block, index = v
+    index_hash_work_tuples = blockchain_view.node_tuples
+
+    for block, index in fetch_blocks_after(
+            args.network, index_hash_work_tuples, peer_addresses=args.peer,
+            filter_f=filter_f, new_peer_callback=new_peer_callback):
         logging.debug("last_block_index = %s (%s)", index,
                       datetime.datetime.fromtimestamp(block.timestamp))
-        if hasattr(block, "tx_futures"):
-            txs = []
-            for f in block.tx_futures:
-                txs.append(await f)
-        else:
-            txs = block.txs
+        txs = block.txs
         if len(txs) > 0:
             logging.info(
                 "got block %06d: %s... with %d transactions",
@@ -180,9 +140,7 @@ async def wallet_fetch(args):
             logging.info("at block %06d (%s)" % (
                 index, datetime.datetime.fromtimestamp(block.timestamp)))
             wallet.set_last_block_index(index)
-            await commit_to_persistence(blockchain_view, persistence, index)
-    peer_to_block_pipe.stop()
-    await commit_to_persistence(blockchain_view, persistence)
+            commit_to_persistence(blockchain_view, persistence, index)
 
 
 def wallet_balance(args):
@@ -378,7 +336,7 @@ def main():
     loop = asyncio.get_event_loop()
 
     if args.command == "fetch":
-        loop.run_until_complete(wallet_fetch(args))
+        wallet_fetch(args)
     if args.command == "balance":
         wallet_balance(args)
     if args.command == "tx":

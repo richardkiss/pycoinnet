@@ -165,7 +165,8 @@ def get_peer_pipeline(network, peer_addresses, peer_q):
 
 
 def fetch_blocks_after(
-        network, index_hash_work_tuples, peer_addresses=None, filter_f=lambda bh, index: ITEM_TYPE_BLOCK):
+        network, index_hash_work_tuples, peer_addresses=None,
+        filter_f=lambda bh, index: ITEM_TYPE_BLOCK, new_peer_callback=None):
 
     # yields blocks until we run out
     loop = asyncio.get_event_loop()
@@ -186,7 +187,11 @@ def fetch_blocks_after(
         peer.set_request_callback("feefilter", lambda *args: None)
         await peer_to_block_pipe.put(peer)
         await inv_batcher.add_peer(peer)
+        if new_peer_callback:
+            await new_peer_callback(peer)
         peer.start()
+        # BRAIN DAMAGE: this doesn't work with more than one peer
+        await asyncio.sleep(10000)
 
     new_peer_q = MappingQueue(
         dict(callback_f=got_new_peer, input_q=peer_pipeline, worker_count=1)
