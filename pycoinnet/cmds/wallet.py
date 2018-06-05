@@ -11,24 +11,26 @@ import os.path
 import sqlite3
 import time
 
+from collections import defaultdict
+
 from pycoin.bloomfilter import BloomFilter, filter_size_required, hash_function_count_required
 from pycoin.convention import satoshi_to_mbtc
 from pycoin.encoding.b58 import a2b_hashed_base58
 from pycoin.ui.validate import is_address_valid
 from pycoin.networks.registry import network_for_netcode
-from pycoin.message.InvItem import ITEM_TYPE_BLOCK, ITEM_TYPE_MERKLEBLOCK, InvItem
+from pycoin.message.InvItem import ITEM_TYPE_BLOCK, ITEM_TYPE_MERKLEBLOCK
+from pycoin.serialize import b2h_rev
 from pycoin.tx.tx_utils import create_tx
 from pycoin.wallet.SQLite3Persistence import SQLite3Persistence
 from pycoin.wallet.SQLite3Wallet import SQLite3Wallet
 
 from pycoinnet.BlockChainView import BlockChainView
-from pycoinnet.MappingQueue import MappingQueue
 
-from pycoinnet.blockcatchup import improve_headers, create_peer_to_block_pipe
+from pycoinnet.blockcatchup import create_peer_to_block_pipe, peer_connect_pipeline
 from pycoinnet.inv_batcher import InvBatcher
 from pycoinnet.pong_manager import install_pong_manager
 
-from .common import init_logging, peer_connect_pipeline
+from .common import init_logging
 
 
 class Keychain(object):
@@ -153,6 +155,7 @@ async def wallet_fetch(args):
         peer.set_request_callback("inv", lambda *args: None)
         await peer_to_block_pipe.put(peer)
         await inv_batcher.add_peer(peer)
+        install_pong_manager(peer)
         peer.start()
 
     while True:
@@ -231,6 +234,7 @@ def wallet_tx(args):
         if total_input_value >= total_sending:
             break
 
+    spendables.sort(key=lambda _: _.coin_value)
     print("found %d coins which exceed %d" % (total_input_value, total_sending))
 
     #change_amount = total_input_value - fee - total_sending
@@ -284,6 +288,50 @@ def wallet_dump(args):
             print(spendable.as_text())
 
 
+def satoshis_to_amount(s):
+    if s >= 0:
+        return "+%s " % satoshi_to_mbtc(s)
+    return "(%s)" % satoshi_to_mbtc(s)
+
+
+def wallet_history(args):
+    basepath, persistence = basepath_persistence_for_args(args)
+    spendables = list(persistence.all_spendables())
+    spendable_lookup = defaultdict(list)
+    for s in spendables:
+        spendable_lookup[s.block_index_available].append(s)
+        spendable_lookup[s.block_index_spent].append(s)
+    balance = 0
+    for bi in sorted(spendable_lookup.keys()):
+        if bi == 0:
+            continue
+        sorted_spendables = sorted(spendable_lookup[bi], key=lambda _: _.tx_hash)
+        delta = 0
+        txs = []
+        for s in sorted_spendables:
+            if s.block_index_available == bi:
+                note = "%s %s" % (
+                    args.network.ui.address_for_script(s.script), b2h_rev(s.tx_hash))
+                delta += s.coin_value
+                tx = "%16s mBTC %s" % (satoshis_to_amount(s.coin_value), note)
+                txs.append(tx)
+        for s in sorted_spendables:
+            if s.block_index_spent == bi:
+                note = args.network.ui.address_for_script(s.script)
+                delta -= s.coin_value
+                tx = "%16s mBTC %s" % (satoshis_to_amount(-s.coin_value), note)
+                txs.append(tx)
+        amount = satoshis_to_amount(delta)
+        balance += delta
+        if len(txs) > 1:
+            print("      T %16s mBTC" % amount)
+            for _ in txs:
+                print("            %s" % _)
+        else:
+            print("      T %s" % txs[0])
+        print("%7d: %14s" % (bi, satoshi_to_mbtc(balance)))
+
+
 def create_parser():
     parser = argparse.ArgumentParser(description="SPV wallet.")
     parser.add_argument('-p', "--path", help='The path to the wallet files.', default="~/.pycoin/wallet/")
@@ -316,6 +364,7 @@ def create_parser():
     rewind_parser.add_argument('block_number', type=int, help="block number to rewind to")
 
     subparsers.add_parser('dump', help="Dump spendables")
+    subparsers.add_parser('history', help="Show history")
 
     return parser
 
@@ -340,6 +389,8 @@ def main():
         wallet_rewind(args)
     if args.command == "dump":
         wallet_dump(args)
+    if args.command == "history":
+        wallet_history(args)
 
 
 if __name__ == '__main__':
