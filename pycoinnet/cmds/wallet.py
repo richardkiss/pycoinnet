@@ -100,11 +100,11 @@ def commit_to_persistence(blockchain_view, persistence, last_block=None):
 def wallet_fetch(args):
     wallet, persistence, blockchain_view = wallet_persistence_for_args(args)
 
-    last_block = wallet.last_block_index()
-    blockchain_view.rewind(last_block)
-    wallet.rewind(last_block)
+    last_block_index = wallet.last_block_index()
+    blockchain_view.rewind(last_block_index)
+    wallet.rewind(last_block_index)
 
-    spendables = list(persistence.unspent_spendables(last_block))
+    spendables = list(persistence.unspent_spendables(last_block_index))
 
     bloom_filter = bloom_filter_for_addresses_spendables(
         wallet.keychain.hash160_set(), spendables, element_pad_count=2000)
@@ -125,22 +125,24 @@ def wallet_fetch(args):
 
     index_hash_work_tuples = blockchain_view.node_tuples
 
-    for block, index in fetch_blocks_after(
+    for block, last_block_index in fetch_blocks_after(
             args.network, index_hash_work_tuples, peer_addresses=args.peer,
             filter_f=filter_f, new_peer_callback=new_peer_callback):
-        logging.debug("last_block_index = %s (%s)", index,
+        logging.debug("last_block_index = %s (%s)", last_block_index,
                       datetime.datetime.fromtimestamp(block.timestamp))
         txs = block.txs
         if len(txs) > 0:
             logging.info(
                 "got block %06d: %s... with %d transactions",
-                index, block.id()[:32], len(txs))
-        wallet._add_block(block, index, txs)
-        if index % 50 == 0:
+                last_block_index, block.id()[:32], len(txs))
+        wallet._add_block(block, last_block_index, txs)
+        blockchain_view.do_headers_improve_path([block])
+        if last_block_index % 50 == 0:
             logging.info("at block %06d (%s)" % (
-                index, datetime.datetime.fromtimestamp(block.timestamp)))
-            wallet.set_last_block_index(index)
-            commit_to_persistence(blockchain_view, persistence, index)
+                last_block_index, datetime.datetime.fromtimestamp(block.timestamp)))
+            wallet.set_last_block_index(last_block_index)
+            commit_to_persistence(blockchain_view, persistence, last_block_index)
+    commit_to_persistence(blockchain_view, persistence, last_block_index)
 
 
 def wallet_balance(args):

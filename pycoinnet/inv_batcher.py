@@ -16,7 +16,7 @@ class InvBatcher:
             peer, desired_batch_size = peer_batch_tuple
             batch = []
             skipped = []
-            logging.debug("peer %s trying to build batch up to size %d", peer, desired_batch_size)
+            logging.debug("peer %s building batch max size %d", peer, desired_batch_size)
             while len(batch) == 0 or (
                     len(batch) < desired_batch_size and not self._inv_item_future_queue.empty()):
                 item = await self._inv_item_future_queue.get()
@@ -43,7 +43,7 @@ class InvBatcher:
             await asyncio.wait(futures, timeout=target_batch_time)
             end_time = loop.time()
             batch_time = end_time - start_time
-            logging.debug("completed batch size of %d with time %f", len(inv_items), batch_time)
+            logging.debug("completed batch size %d in %f s from %s", len(inv_items), batch_time, peer)
             completed_count = sum([1 for f in futures if f.done()])
             item_per_unit_time = completed_count / batch_time
             new_batch_size = min(prior_max * 4, int(target_batch_time * item_per_unit_time + 0.5))

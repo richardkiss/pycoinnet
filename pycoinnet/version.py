@@ -1,3 +1,4 @@
+import ipaddress
 import os
 import time
 
@@ -44,8 +45,9 @@ NODE_NETWORK_LIMITED = (1 << 10)
 
 
 def ip_2_bin(ip):
-    # TODO: make work for ipv6
-    return bytes(int(x) for x in ip.split("."))
+    ZEROS = b'\0' * 12
+    b = (ZEROS + ipaddress.ip_address(ip).packed)[-16:]
+    return b
 
 
 def random_nonce_for_version():

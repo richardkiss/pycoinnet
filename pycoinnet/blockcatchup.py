@@ -33,6 +33,84 @@ def parser_and_packer_for_network(network):
     return new_parser, packer
 
 
+def create_peer_to_header_queue(index_hash_work_tuples, inv_batcher, loop=None):
+    # create and return a Mapping Queue that takes peers as input
+    # and produces tuples of (initial_block, [headers]) as output
+
+    blockchain_view = BlockChainView(index_hash_work_tuples)
+
+    peer_q = asyncio.Queue()
+
+    async def peer_to_header_tuples(peer, q):
+        block_locator_hashes = blockchain_view.block_locator_hashes()
+        hash_stop = blockchain_view.hash_initial_block()
+        logging.debug("getting headers after %d", blockchain_view.last_block_tuple()[0])
+        # BRAIN DAMAGE: need a timeout here
+        data = await peer.request_response(
+            "getheaders", "headers", version=1,
+            hashes=block_locator_hashes, hash_stop=hash_stop)
+        headers = [bh for bh, t in data["headers"]]
+
+        while len(headers) > 0 and headers[0].previous_block_hash != blockchain_view.last_block_tuple()[1]:
+            import pdb; pdb.set_trace()
+            # this hack is necessary because the stupid default client
+            # does not send the genesis block!
+            bh = headers[0].previous_block_hash
+            f = await inv_batcher.inv_item_to_future(InvItem(ITEM_TYPE_BLOCK, bh))
+            block = await f
+            headers = [block] + headers
+
+        block_number = blockchain_view.do_headers_improve_path(headers)
+        if block_number is False:
+            if peer_q.qsize() == 0:
+                await q.put(None)
+            # this peer has exhausted its view
+            return
+
+        logging.debug("block header count is now %d", block_number)
+        hashes = []
+
+        for idx in range(blockchain_view.last_block_index()+1-block_number):
+            the_tuple = blockchain_view.tuple_for_index(idx+block_number)
+            assert the_tuple[0] == idx + block_number
+            assert headers[idx].hash() == the_tuple[1]
+            hashes.append(headers[idx])
+        await q.put((block_number, hashes))
+        await peer_q.put(peer)
+
+    return MappingQueue(
+        dict(callback_f=peer_to_header_tuples, input_q=peer_q, worker_count=1),
+        final_q=asyncio.Queue(maxsize=2), loop=loop)
+
+
+def create_header_to_block_future_queue(inv_batcher, input_q=None, filter_f=None, loop=None):
+
+    input_q = input_q or asyncio.Queue()
+    filter_f = filter_f or (lambda block_hash, index: ITEM_TYPE_BLOCK)
+
+    # accepts (initial_block_index, [headers]) tuples as input
+    # produces (block_future, index) tuples as output
+
+    async def create_block_hash_entry(item, q):
+        if item is None:
+            await q.put(None)
+            return
+        first_block_index, block_headers = item
+        logging.info("got %d new header(s) starting at %d" % (len(block_headers), first_block_index))
+        block_hash_priority_pair_list = [(bh, first_block_index + _) for _, bh in enumerate(block_headers)]
+
+        for bh, block_index in block_hash_priority_pair_list:
+            item_type = filter_f(bh, block_index)
+            if not item_type:
+                continue
+            f = await inv_batcher.inv_item_to_future(InvItem(item_type, bh.hash()), priority=block_index)
+            await q.put((f, block_index))
+
+    return MappingQueue(
+        dict(callback_f=create_block_hash_entry, input_q=input_q, worker_count=1),
+        final_q=asyncio.Queue(maxsize=500), loop=loop)
+
+
 def peer_connect_pipeline(network, tcp_connect_workers=30, handshake_workers=3,
                           host_q=None, loop=None, version_dict={}):
 
@@ -69,84 +147,6 @@ def peer_connect_pipeline(network, tcp_connect_workers=30, handshake_workers=3,
     return MappingQueue(*filters, loop=loop)
 
 
-async def improve_headers(peer, bcv, inv_batcher):
-    block_locator_hashes = bcv.block_locator_hashes()
-    logging.debug("getting headers after %d", bcv.last_block_tuple()[0])
-    data = await peer.request_response(
-        "getheaders", "headers", version=1,
-        hashes=block_locator_hashes, hash_stop=bcv.hash_initial_block())
-    headers = [bh for bh, t in data["headers"]]
-
-    if block_locator_hashes[-1] == bcv.hash_initial_block():
-        # this hack is necessary because the stupid default client
-        # does not send the genesis block!
-        bh = headers[0].previous_block_hash
-        f = await inv_batcher.inv_item_to_future(InvItem(ITEM_TYPE_BLOCK, bh))
-        block = await f
-        headers = [block] + headers
-    return headers
-
-
-def create_peer_to_block_pipe(bcv, inv_batcher, filter_f=lambda block_hash, index: ITEM_TYPE_BLOCK):
-    """
-    return a MappingQueue that accepts: peer objects
-    and yields: block objects
-    """
-
-    improve_headers_pipe = asyncio.Queue()
-
-    async def note_peer(peer, q):
-        headers = await improve_headers(peer, bcv, inv_batcher)
-
-        block_number = bcv.do_headers_improve_path(headers)
-        if block_number is False:
-            await q.put(None)
-            return
-
-        logging.debug("block header count is now %d", block_number)
-        hashes = []
-
-        for idx in range(bcv.last_block_index()+1-block_number):
-            the_tuple = bcv.tuple_for_index(idx+block_number)
-            assert the_tuple[0] == idx + block_number
-            assert headers[idx].hash() == the_tuple[1]
-            hashes.append(headers[idx])
-        await q.put((block_number, hashes))
-        await improve_headers_pipe.put(peer)
-
-    async def create_block_hash_entry(item, q):
-        if item is None:
-            await q.put(None)
-            return
-        first_block_index, block_headers = item
-        logging.info("got %d new header(s) starting at %d" % (len(block_headers), first_block_index))
-        block_hash_priority_pair_list = [(bh, first_block_index + _) for _, bh in enumerate(block_headers)]
-
-        for bh, pri in block_hash_priority_pair_list:
-            item_type = filter_f(bh, pri)
-            if not item_type:
-                continue
-            f = await inv_batcher.inv_item_to_future(InvItem(item_type, bh.hash()))
-            await q.put((f, pri))
-
-    async def wait_future(pair, q):
-        if pair is None:
-            await q.put(None)
-            return
-        future, index = pair
-        block = await future
-        await q.put((block, index))
-
-    peer_to_block_pipe = MappingQueue(
-        dict(callback_f=note_peer, worker_count=1, input_q=improve_headers_pipe),
-        dict(callback_f=create_block_hash_entry, worker_count=1, input_q_maxsize=2),
-        dict(callback_f=wait_future, input_q_maxsize=1000),
-        final_q=asyncio.Queue(maxsize=100)
-    )
-    peer_to_block_pipe.inv_batcher = inv_batcher
-    return peer_to_block_pipe
-
-
 def get_peer_pipeline(network, peer_addresses, peer_q):
     # for now, let's just do one peer
     host_q = None
@@ -175,33 +175,38 @@ def fetch_blocks_after(
 
     inv_batcher = InvBatcher()
 
-    peer_to_block_pipe = create_peer_to_block_pipe(blockchain_view, inv_batcher, filter_f=filter_f)
+    peer_to_header_queue = create_peer_to_header_queue(index_hash_work_tuples, inv_batcher)
+    header_to_block_future_queue = create_header_to_block_future_queue(inv_batcher, input_q=peer_to_header_queue)
 
-    peer_pipeline = get_peer_pipeline(network, peer_addresses, peer_to_block_pipe)
+    def got_addr(peer, name, data):
+        pass
 
     async def got_new_peer(peer, q):
         install_pong_manager(peer)
         peer.set_request_callback("alert", lambda *args: None)
-        peer.set_request_callback("addr", lambda *args: None)
+        peer.set_request_callback("addr", got_addr)
         peer.set_request_callback("inv", lambda *args: None)
         peer.set_request_callback("feefilter", lambda *args: None)
-        await peer_to_block_pipe.put(peer)
+        peer.set_request_callback("sendheaders", lambda *args: None)
+        peer.set_request_callback("sendcmpct", lambda *args: None)
+        await peer_to_header_queue.put(peer)
         await inv_batcher.add_peer(peer)
         if new_peer_callback:
             await new_peer_callback(peer)
         peer.start()
-        # BRAIN DAMAGE: this doesn't work with more than one peer
-        await asyncio.sleep(10000)
+
+    peer_pipeline = get_peer_pipeline(network, peer_addresses, got_new_peer)
 
     new_peer_q = MappingQueue(
         dict(callback_f=got_new_peer, input_q=peer_pipeline, worker_count=1)
     )
 
     while True:
-        v = loop.run_until_complete(peer_to_block_pipe.get())
+        v = loop.run_until_complete(header_to_block_future_queue.get())
         if v is None:
             break
-        block, index = v
+        block_future, index = v
+        block = loop.run_until_complete(block_future)
         if hasattr(block, "tx_futures"):
             txs = []
             for f in block.tx_futures:
@@ -209,5 +214,6 @@ def fetch_blocks_after(
             block.txs = txs
         yield block, index
 
-    peer_to_block_pipe.stop()
+    peer_to_header_queue.stop()
+    header_to_block_future_queue.stop()
     new_peer_q.stop()
