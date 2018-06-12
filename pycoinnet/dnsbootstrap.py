@@ -3,7 +3,7 @@ import asyncio
 from .MappingQueue import MappingQueue
 
 
-def dns_bootstrap_host_port_q(network, getaddrinfo=asyncio.get_event_loop().getaddrinfo):
+def dns_bootstrap_host_port_q(network, output_q=None, getaddrinfo=asyncio.get_event_loop().getaddrinfo):
     """
     Accepts network type and returns an asyncio.Queue, which is loads with tuples of the
     form (host, port). When it runs out, it puts a "None" to terminate.
@@ -30,6 +30,6 @@ def dns_bootstrap_host_port_q(network, getaddrinfo=asyncio.get_event_loop().geta
         dict(callback_f=flatten),
         dict(callback_f=getaddr),
     ]
-    q = MappingQueue(*filters)
+    q = MappingQueue(*filters, final_q=output_q)
     q.put_nowait(network.dns_bootstrap)
     return q
