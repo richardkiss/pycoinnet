@@ -33,7 +33,7 @@ def parser_and_packer_for_network(network):
     return new_parser, packer
 
 
-def create_peer_to_header_queue(index_hash_work_tuples, inv_batcher, loop=None):
+def create_peer_to_header_q(index_hash_work_tuples, inv_batcher, loop=None):
     # create and return a Mapping Queue that takes peers as input
     # and produces tuples of (initial_block, [headers]) as output
 
@@ -52,7 +52,6 @@ def create_peer_to_header_queue(index_hash_work_tuples, inv_batcher, loop=None):
         headers = [bh for bh, t in data["headers"]]
 
         while len(headers) > 0 and headers[0].previous_block_hash != blockchain_view.last_block_tuple()[1]:
-            import pdb; pdb.set_trace()
             # this hack is necessary because the stupid default client
             # does not send the genesis block!
             bh = headers[0].previous_block_hash
@@ -83,7 +82,7 @@ def create_peer_to_header_queue(index_hash_work_tuples, inv_batcher, loop=None):
         final_q=asyncio.Queue(maxsize=2), loop=loop)
 
 
-def create_header_to_block_future_queue(inv_batcher, input_q=None, filter_f=None, loop=None):
+def create_header_to_block_future_q(inv_batcher, input_q=None, filter_f=None, loop=None):
 
     input_q = input_q or asyncio.Queue()
     filter_f = filter_f or (lambda block_hash, index: ITEM_TYPE_BLOCK)
@@ -171,12 +170,10 @@ def fetch_blocks_after(
     # yields blocks until we run out
     loop = asyncio.get_event_loop()
 
-    blockchain_view = BlockChainView(index_hash_work_tuples)
-
     inv_batcher = InvBatcher()
 
-    peer_to_header_queue = create_peer_to_header_queue(index_hash_work_tuples, inv_batcher)
-    header_to_block_future_queue = create_header_to_block_future_queue(inv_batcher, input_q=peer_to_header_queue)
+    peer_to_header_q = create_peer_to_header_q(index_hash_work_tuples, inv_batcher)
+    header_to_block_future_q = create_header_to_block_future_q(inv_batcher, input_q=peer_to_header_q)
 
     def got_addr(peer, name, data):
         pass
@@ -189,7 +186,7 @@ def fetch_blocks_after(
         peer.set_request_callback("feefilter", lambda *args: None)
         peer.set_request_callback("sendheaders", lambda *args: None)
         peer.set_request_callback("sendcmpct", lambda *args: None)
-        await peer_to_header_queue.put(peer)
+        await peer_to_header_q.put(peer)
         await inv_batcher.add_peer(peer)
         if new_peer_callback:
             await new_peer_callback(peer)
@@ -202,7 +199,7 @@ def fetch_blocks_after(
     )
 
     while True:
-        v = loop.run_until_complete(header_to_block_future_queue.get())
+        v = loop.run_until_complete(header_to_block_future_q.get())
         if v is None:
             break
         block_future, index = v
@@ -214,6 +211,6 @@ def fetch_blocks_after(
             block.txs = txs
         yield block, index
 
-    peer_to_header_queue.stop()
-    header_to_block_future_queue.stop()
+    peer_to_header_q.stop()
+    header_to_block_future_q.stop()
     new_peer_q.stop()
