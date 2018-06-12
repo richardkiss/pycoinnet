@@ -52,7 +52,8 @@ class Peer:
                 blob = await reader.readexactly(header_size)
                 self._bytes_read += header_size
                 if blob != self._magic_header:
-                    raise ProtocolError("bad magic: got %s" % binascii.hexlify(blob))
+                    logging.error("got bad magic: %s" % binascii.hexlify(blob))
+                    return None
 
                 # read message name
                 message_size_hash_bytes = await reader.readexactly(20)
@@ -64,7 +65,8 @@ class Peer:
                 size_bytes = message_size_hash_bytes[12:16]
                 size = int.from_bytes(size_bytes, byteorder="little")
                 if size > self._max_msg_size:
-                    raise ProtocolError("absurdly large message size %d" % size)
+                    logging.error("message too large: size %d" % size)
+                    return None
 
                 # read the hash, then the message
                 transmitted_hash = message_size_hash_bytes[16:20]
@@ -76,8 +78,9 @@ class Peer:
         # check the hash
         actual_hash = hash.double_sha256(message_data)[:4]
         if actual_hash != transmitted_hash:
-            raise ProtocolError("checksum is WRONG: %s instead of %s" % (
+            logging.error("checksum is WRONG: %s instead of %s" % (
                 binascii.hexlify(actual_hash), binascii.hexlify(transmitted_hash)))
+            return None
         logging.debug("message %s: %s (%d byte payload)", self, message_name, len(message_data))
         if unpack_to_dict:
             message_data = self._parse_from_data(message_name, message_data)
@@ -147,6 +150,9 @@ class Peer:
                 del self._response_futures[name]
             else:
                 logging.error("unhandled event %s %s", event[0], event[1])
+
+    async def wait_until_close(self):
+        await self._task
 
     def __repr__(self):
         return "<Peer %s>" % str(self.peername())

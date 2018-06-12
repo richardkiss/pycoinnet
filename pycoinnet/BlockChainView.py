@@ -156,9 +156,7 @@ class BlockChainView:
         expected_prior_hash = the_tuple[1]
         for idx, h in enumerate(headers):
             if h.previous_block_hash != expected_prior_hash:
-                raise ValueError(
-                    "headers are not properly linked: no known block with hash %s" % b2h_rev(
-                        h.previous_block_hash))
+                break
             total_work += 1  # TODO: make this difficulty/work instead of path size
             expected_prior_hash = h.hash()
             tuples.append((idx + new_start_idx, expected_prior_hash, total_work))
