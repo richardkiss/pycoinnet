@@ -33,13 +33,13 @@ def parser_and_packer_for_network(network):
     return new_parser, packer
 
 
-def create_peer_to_header_q(index_hash_work_tuples, inv_batcher, loop=None):
+def create_peer_to_header_q(index_hash_work_tuples, inv_batcher, output_q=None, loop=None):
     # create and return a Mapping Queue that takes peers as input
     # and produces tuples of (initial_block, [headers]) as output
 
     blockchain_view = BlockChainView(index_hash_work_tuples)
 
-    peer_q = asyncio.Queue()
+    peer_q = output_q or asyncio.Queue()
 
     async def peer_to_header_tuples(peer, q):
         block_locator_hashes = blockchain_view.block_locator_hashes()

@@ -12,7 +12,7 @@ from pycoin.message.make_parser_and_packer import (
 
 
 def create_hostport_to_peers_q(
-        network, peer_count=8, version_dict={}, connect_workers=30,
+        network, peer_count=8, output_q=None, version_dict={}, connect_workers=30,
         connect_callback=None, loop=None):
 
     async def do_peer_connect(host_port_pair, q):
@@ -49,4 +49,4 @@ def create_hostport_to_peers_q(
         dict(callback_f=wait_until_peer_done, worker_count=peer_count),
     ]
 
-    return MappingQueue(*filters, loop=loop)
+    return MappingQueue(*filters, final_q=output_q, loop=loop)
