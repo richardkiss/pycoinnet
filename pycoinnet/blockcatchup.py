@@ -12,27 +12,6 @@ from pycoinnet.pong_manager import install_pong_manager
 from pycoinnet.version import version_data_for_peer
 
 
-def parser_and_packer_for_network(network):
-    # BRAIN DAMAGE
-    from pycoin.message.make_parser_and_packer import (
-        make_parser_and_packer, standard_messages,
-        standard_message_post_unpacks, standard_streamer, standard_parsing_functions
-    )
-
-    streamer = standard_streamer(standard_parsing_functions(network.block, network.tx))
-    parser, packer = make_parser_and_packer(
-        streamer, standard_messages(), standard_message_post_unpacks(streamer))
-
-    def new_parser(message, data):
-        try:
-            return parser(message, data)
-        except KeyError:
-            logging.error("unknown message %s", message)
-            return b''
-
-    return new_parser, packer
-
-
 def create_peer_to_header_q(index_hash_work_tuples, inv_batcher, output_q=None, loop=None):
     # create and return a Mapping Queue that takes peers as input
     # and produces tuples of (initial_block, [headers]) as output
@@ -127,10 +106,9 @@ def peer_connect_pipeline(network, tcp_connect_workers=30, handshake_workers=3,
 
     async def do_peer_handshake(rw_tuple, q):
         reader, writer = rw_tuple
-        parse_from_data, pack_from_data = parser_and_packer_for_network(network)
         peer = Peer(
-            reader, writer, network.magic_header, parse_from_data,
-            pack_from_data, max_msg_size=10*1024*1024)
+            reader, writer, network.magic_header, network.parse_message,
+            network.pack_message, max_msg_size=10*1024*1024)
         version_data = version_data_for_peer(peer, **version_dict)
         peer.version = await peer.perform_handshake(**version_data)
         if peer.version is None:
