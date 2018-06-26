@@ -1,7 +1,6 @@
 import hashlib
 
 from pycoin import ecdsa
-from pycoin.block import Block
 from pycoin.encoding.sec import public_pair_to_sec
 from pycoin.merkle import merkle
 
@@ -41,7 +40,7 @@ def make_headers(count, header=None):
 def coinbase_tx(network, secret_exponent):
     public_pair = network.extras.Key(secret_exponent).public_pair()
     public_key_sec = public_pair_to_sec(public_pair)
-    return network.Tx.coinbase_tx(public_key_sec, 2500000000)
+    return network.tx.coinbase_tx(public_key_sec, 2500000000)
 
 
 def make_blocks(count, nonce_base=30000, previous_block_hash=HASH_INITIAL_BLOCK):
@@ -52,8 +51,8 @@ def make_blocks(count, nonce_base=30000, previous_block_hash=HASH_INITIAL_BLOCK)
         nonce = s
         while True:
             merkle_root = merkle([tx.hash() for tx in txs])
-            block = Block(version=1, previous_block_hash=previous_block_hash, merkle_root=merkle_root,
-                          timestamp=GENESIS_TIME+i*600, difficulty=i, nonce=nonce)
+            block = network.block(version=1, previous_block_hash=previous_block_hash, merkle_root=merkle_root,
+                                  timestamp=GENESIS_TIME+i*600, difficulty=i, nonce=nonce)
             block.set_txs(txs)
             if block.hash()[-1] == i & 0xff:
                 break
