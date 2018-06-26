@@ -1,16 +1,15 @@
-from pycoin.networks.registry import network_for_netcode
+from pycoin.symbols.btc import network as NETWORK
 
 from pycoinnet.BlockChainView import BlockChainView
 from tests.helper import make_blocks, make_headers
 
 
 def test1():
-    network = network_for_netcode("BTC")
     bcv = BlockChainView()
     assert bcv.last_block_index() == -1
     assert bcv.block_locator_hashes() == [b'\0' * 32]
 
-    blocks = make_blocks(network, 20)
+    blocks = make_blocks(NETWORK, 20)
     v = bcv.do_headers_improve_path(blocks)
     assert v == 0
 
@@ -73,7 +72,7 @@ def test_halfsies():
 
 
 def make_bcv(node_count):
-    headers = make_headers(node_count)
+    headers = make_headers(NETWORK, node_count)
     nodes = ((i, header.hash(), i) for i, header in enumerate(headers))
     return BlockChainView(nodes)
 
@@ -105,7 +104,7 @@ def test_tuple_for_index():
 def test_tuple_for_hash():
     for size in [100, 500, 720, 1000]:
         bcv = make_bcv(size)
-        headers = make_headers(size)
+        headers = make_headers(NETWORK, size)
         for idx, header in enumerate(headers):
             the_hash = header.hash()
             the_tuple = bcv.tuple_for_hash(the_hash)
@@ -125,7 +124,7 @@ def test_tuple_for_hash():
 
 def test_block_locator_hashes():
     for size in [100, 500, 720, 1000]:
-        headers = make_headers(size)
+        headers = make_headers(NETWORK, size)
         nodes = [(i, headers[i].hash(), i) for i in range(size)]
         bcv = BlockChainView(nodes)
         blh = bcv.block_locator_hashes()
@@ -144,7 +143,7 @@ def test_block_locator_hashes():
 
 def test_improve_path():
     size = 100
-    headers = make_headers(size)
+    headers = make_headers(NETWORK, size)
     bcv = make_bcv(0)
     assert bcv.last_block_index() == -1
     for count in range(100):
@@ -152,7 +151,7 @@ def test_improve_path():
         assert report == count
         assert bcv.last_block_index() == count
     # let's try to extend from 95
-    headers = make_headers(10, headers[95])
+    headers = make_headers(NETWORK, 10, headers[95])
 
     for count in range(96, 100):
         report = bcv.do_headers_improve_path(headers[0:count-95])

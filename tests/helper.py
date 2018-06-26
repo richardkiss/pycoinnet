@@ -22,7 +22,7 @@ def make_tx(network, i):
     return tx
 
 
-def make_headers(count, header=None):
+def make_headers(network, count, header=None):
     if header is None:
         last_hash = HASH_INITIAL_BLOCK
     else:
@@ -31,8 +31,8 @@ def make_headers(count, header=None):
     headers = []
     for i in range(count):
         headers.append(
-            Block(version=1, previous_block_hash=last_hash, merkle_root=make_hash(i, tweak),
-                  timestamp=GENESIS_TIME+i*600, difficulty=DEFAULT_DIFFICULTY, nonce=i*137))
+            network.block(version=1, previous_block_hash=last_hash, merkle_root=make_hash(i, tweak),
+                          timestamp=GENESIS_TIME+i*600, difficulty=DEFAULT_DIFFICULTY, nonce=i*137))
         last_hash = headers[-1].hash()
     return headers
 
