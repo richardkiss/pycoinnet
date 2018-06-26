@@ -1,8 +1,12 @@
 import asyncio
 import unittest
 
+from pycoin.networks.registry import network_for_netcode
+
 from pycoinnet.dnsbootstrap import dns_bootstrap_host_port_q
-from pycoinnet.networks import MAINNET
+
+
+MAINNET = network_for_netcode("BTC")
 
 
 def make_getaddrinfo():

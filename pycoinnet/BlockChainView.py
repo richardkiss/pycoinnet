@@ -1,6 +1,6 @@
 import json
 
-from pycoin.serialize import b2h_rev, h2b_rev
+from pycoin.encoding.hexbytes import b2h_rev, h2b_rev
 
 
 class BlockChainView:

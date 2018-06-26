@@ -9,8 +9,8 @@ import asyncio
 import logging
 import os.path
 
+from pycoin.encoding.hexbytes import b2h_rev
 from pycoin.networks.registry import network_codes, network_for_netcode
-from pycoin.serialize import b2h_rev
 
 from pycoinnet.headerpipeline import improve_headers
 from pycoinnet.MappingQueue import MappingQueue

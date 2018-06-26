@@ -3,7 +3,7 @@ import collections.abc
 import os
 import re
 
-from pycoin.serialize import b2h_rev
+from pycoin.encoding.hexbytes import b2h_rev
 
 
 class DictStoreSimple(collections.abc.MutableMapping):

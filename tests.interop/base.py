@@ -4,7 +4,7 @@ import logging
 import os
 import unittest
 
-from pycoin.serialize import h2b_rev
+from pycoin.encoding.hexbytes import h2b_rev
 
 from pycoinnet.Blockfetcher import Blockfetcher
 from pycoinnet.InvFetcher import InvFetcher

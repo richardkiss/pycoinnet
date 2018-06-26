@@ -2,14 +2,17 @@ import asyncio
 import unittest
 
 from pycoin.message.InvItem import InvItem
+from pycoin.networks.registry import network_for_netcode
 
 from pycoinnet.Peer import Peer
-from pycoinnet.networks import MAINNET
 from pycoinnet.version import version_data_for_peer
 
 from .peer_helper import create_peer_pair
 from .pipes import create_direct_streams_pair
 from .timeless_eventloop import TimelessEventLoop
+
+
+MAINNET = network_for_netcode("BTC")
 
 
 def run(f):

@@ -16,11 +16,11 @@ from collections import defaultdict
 from pycoin.bloomfilter import BloomFilter, filter_size_required, hash_function_count_required
 from pycoin.convention import satoshi_to_mbtc
 from pycoin.encoding.b58 import a2b_hashed_base58
+from pycoin.encoding.hexbytes import b2h_rev
 from pycoin.ui.validate import is_address_valid
 from pycoin.networks.registry import network_for_netcode
 from pycoin.message.InvItem import ITEM_TYPE_BLOCK, ITEM_TYPE_MERKLEBLOCK
-from pycoin.serialize import b2h_rev
-from pycoin.tx.tx_utils import create_tx
+from pycoin.coins.tx_utils import create_tx
 from pycoin.wallet.SQLite3Persistence import SQLite3Persistence
 from pycoin.wallet.SQLite3Wallet import SQLite3Wallet
 
@@ -104,7 +104,7 @@ def wallet_fetch(args):
     blockchain_view.rewind(last_block_index)
     wallet.rewind(last_block_index)
 
-    spendables = list(persistence.unspent_spendables(last_block_index))
+    spendables = list(persistence.unspent_spendables(last_block_index, args.network.tx.Spendable))
 
     bloom_filter = bloom_filter_for_addresses_spendables(
         wallet.keychain.hash160_set(), spendables, element_pad_count=2000)
@@ -149,7 +149,7 @@ def wallet_balance(args):
     basepath, persistence = basepath_persistence_for_args(args)
     last_block = args.block or int(persistence.get_global("block_index") or 0)
     total = 0
-    for spendable in persistence.unspent_spendables(last_block, confirmations=1):
+    for spendable in persistence.unspent_spendables(last_block, args.network.tx.Spendable, confirmations=1):
         if 0 < spendable.block_index_available <= last_block:
             total += spendable.coin_value
     print("block %d: balance = %s mBTC" % (last_block, satoshi_to_mbtc(total)))
@@ -186,7 +186,7 @@ def wallet_tx(args):
 
     total_input_value = 0
     spendables = []
-    unspents = persistence.unspent_spendables(last_block, confirmations=1)
+    unspents = persistence.unspent_spendables(last_block, args.network.tx.Spendable, confirmations=1)
 
     for spendable in unspents:
         spendables.append(spendable)
@@ -243,7 +243,7 @@ def wallet_dump(args):
     wallet, persistence, blockchain_view = wallet_persistence_for_args(args)
     lbi = wallet.last_block_index()
 
-    for spendable in persistence.unspent_spendables(lbi, confirmations=1):
+    for spendable in persistence.unspent_spendables(lbi, args.network.tx.Spendable, confirmations=1):
         if spendable.block_index_available != 0:
             print(spendable.as_text())
 
@@ -256,11 +256,13 @@ def satoshis_to_amount(s):
 
 def wallet_history(args):
     basepath, persistence = basepath_persistence_for_args(args)
-    spendables = list(persistence.all_spendables())
+    spendables = list(persistence.all_spendables(args.network.tx.Spendable))
     spendable_lookup = defaultdict(list)
     for s in spendables:
-        spendable_lookup[s.block_index_available].append(s)
-        spendable_lookup[s.block_index_spent].append(s)
+        if s.block_index_available:
+            spendable_lookup[s.block_index_available].append(s)
+            if s.block_index_spent:
+                spendable_lookup[s.block_index_spent].append(s)
     balance = 0
     for bi in sorted(spendable_lookup.keys()):
         if bi == 0:

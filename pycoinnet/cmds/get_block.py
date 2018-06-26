@@ -1,9 +1,9 @@
 import argparse
 import asyncio
 
+from pycoin.encoding.hexbytes import h2b_rev
 from pycoin.message.InvItem import InvItem, ITEM_TYPE_BLOCK
 from pycoin.networks.registry import network_codes, network_for_netcode
-from pycoin.serialize import h2b_rev
 
 from pycoinnet.blockcatchup import create_peer_to_header_q
 from pycoinnet.dnsbootstrap import dns_bootstrap_host_port_q

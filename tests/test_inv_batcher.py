@@ -3,7 +3,6 @@ import unittest
 
 from pycoin.message.InvItem import InvItem, ITEM_TYPE_TX
 from pycoin.networks.registry import network_for_netcode
-from pycoinnet.networks import MAINNET
 
 from .helper import make_tx
 from .peer_helper import create_handshaked_peer_pair
@@ -18,12 +17,10 @@ def run(f):
 class InvBatcherTest(unittest.TestCase):
     def setUp(self):
         self.network = network_for_netcode("BTC")
-        # BRAIN DAMAGE: pycoin 0.80 doesn't support parse_from_data, pack_from_data
-        self.network = MAINNET
 
     def test_fetch_tx(self):
 
-        txs = [make_tx(_) for _ in range(24)]
+        txs = [make_tx(self.network, _) for _ in range(24)]
         pp1, pp2 = create_handshaked_peer_pair(self.network)
 
         async def go():
@@ -47,7 +44,7 @@ class InvBatcherTest(unittest.TestCase):
         """
         Close after 10 transactions.
         """
-        txs = [make_tx(_) for _ in range(24)]
+        txs = [make_tx(self.network, _) for _ in range(24)]
         pp1, pp2 = create_handshaked_peer_pair(self.network)
 
         inv_batcher = InvBatcher()
@@ -69,5 +66,5 @@ class InvBatcherTest(unittest.TestCase):
         self.assertEqual(len(the_txs), 10)
         for t1, t2 in zip(txs, the_txs):
             self.assertEqual(t1.id(), t2.id())
-        with self.assertRaises(EOFError):
-            run(pp1.next_message())
+        m = run(pp1.next_message())
+        self.assertIsNone(m)

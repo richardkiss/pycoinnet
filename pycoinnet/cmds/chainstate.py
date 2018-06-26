@@ -10,8 +10,8 @@ import logging
 import os.path
 import time
 
+from pycoin.encoding.hexbytes import b2h_rev
 from pycoin.networks.registry import network_for_netcode
-from pycoin.serialize import b2h_rev
 
 from pycoinnet.blockcatchup import create_peer_to_header_q
 from pycoinnet.dnsbootstrap import dns_bootstrap_host_port_q

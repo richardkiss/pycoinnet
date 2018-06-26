@@ -3,10 +3,9 @@ import logging
 import unittest
 
 from pycoin.message.InvItem import ITEM_TYPE_BLOCK
+from pycoin.networks.registry import network_for_netcode
 
 from tests.helper import make_blocks
-
-from pycoinnet.networks import MAINNET
 
 from pycoinnet.Blockfetcher import Blockfetcher
 from pycoinnet.Peer import Peer
@@ -14,6 +13,8 @@ from pycoinnet.Peer import Peer
 from tests.pipes import create_direct_streams_pair
 from tests.timeless_eventloop import TimelessEventLoop
 
+
+MAINNET = network_for_netcode("BTC")
 
 def create_pair(loop):
     (r1, w1), (r2, w2) = create_direct_streams_pair(loop=loop)

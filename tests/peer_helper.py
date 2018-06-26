@@ -12,11 +12,8 @@ def run(f):
 
 def create_peer_pair(network):
     (r1, w1), (r2, w2) = run(create_pipe_streams_pair())
-    streamer = standard_streamer(standard_parsing_functions(network.block, network.tx))
-    parse_from_data, pack_from_data = make_parser_and_packer(
-        streamer, standard_messages(), standard_message_post_unpacks(streamer))
     p1 = Peer(r1, w1, network.magic_header, network.parse_message, network.pack_message)
-    p2 = Peer(r2, w2, network.magic_header, network.parse_message, network.pack_message))
+    p2 = Peer(r2, w2, network.magic_header, network.parse_message, network.pack_message)
     return p1, p2
 
 

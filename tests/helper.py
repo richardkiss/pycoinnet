@@ -2,11 +2,8 @@ import hashlib
 
 from pycoin import ecdsa
 from pycoin.block import Block
-from pycoin.encoding import public_pair_to_sec
-from pycoin.key.Key import Key
+from pycoin.encoding.sec import public_pair_to_sec
 from pycoin.merkle import merkle
-from pycoin.tx.Tx import Tx, TxIn, TxOut
-from pycoin.ui import standard_tx_out_script
 
 GENESIS_TIME = 1390000000
 DEFAULT_DIFFICULTY = 3000000
@@ -17,12 +14,12 @@ def make_hash(i, s=b''):
     return hashlib.sha256(("%d_%s" % (i, s)).encode()).digest()
 
 
-def make_tx(i):
-    key = Key(12345 * (i+29))
-    script = standard_tx_out_script(key.address())
-    txs_in = [TxIn(make_hash(i*10000+idx), (i+idx) % 2) for idx in range(3)]
-    txs_out = [TxOut(i*40000, script) for idx in range(2)]
-    tx = Tx(1, txs_in, txs_out)
+def make_tx(network, i):
+    key = network.extras.Key(12345 * (i+29))
+    script = network.ui.script_for_address(key.address())
+    txs_in = [network.tx.TxIn(make_hash(i*10000+idx), (i+idx) % 2) for idx in range(3)]
+    txs_out = [network.tx.TxOut(i*40000, script) for idx in range(2)]
+    tx = network.tx(1, txs_in, txs_out)
     return tx
 
 
@@ -41,18 +38,17 @@ def make_headers(count, header=None):
     return headers
 
 
-def coinbase_tx(secret_exponent):
-    public_pair = ecdsa.public_pair_for_secret_exponent(
-        ecdsa.secp256k1.generator_secp256k1, secret_exponent)
+def coinbase_tx(network, secret_exponent):
+    public_pair = network.extras.Key(secret_exponent).public_pair()
     public_key_sec = public_pair_to_sec(public_pair)
-    return Tx.coinbase_tx(public_key_sec, 2500000000)
+    return network.Tx.coinbase_tx(public_key_sec, 2500000000)
 
 
 def make_blocks(count, nonce_base=30000, previous_block_hash=HASH_INITIAL_BLOCK):
     blocks = []
     for i in range(count):
         s = i * nonce_base
-        txs = [coinbase_tx(i+1)] + [make_tx(i) for i in range(s, s+8)]
+        txs = [coinbase_tx(network, i+1)] + [make_tx(network, i) for i in range(s, s+8)]
         nonce = s
         while True:
             merkle_root = merkle([tx.hash() for tx in txs])

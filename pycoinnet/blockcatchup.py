@@ -130,8 +130,8 @@ def get_peer_pipeline(network, peer_addresses, peer_q):
     if peer_addresses:
         host_q = asyncio.Queue()
         for peer in peer_addresses:
-            if ":" in peer:
-                host, port = peer.split(":", 1)
+            if "/" in peer:
+                host, port = peer.split("/", 1)
                 port = int(port)
             else:
                 host = peer
@@ -143,7 +143,7 @@ def get_peer_pipeline(network, peer_addresses, peer_q):
 
 def fetch_blocks_after(
         network, index_hash_work_tuples, peer_addresses=None,
-        filter_f=lambda bh, index: ITEM_TYPE_BLOCK, new_peer_callback=None):
+        filter_f=None, new_peer_callback=None):
 
     # yields blocks until we run out
     loop = asyncio.get_event_loop()
@@ -151,7 +151,7 @@ def fetch_blocks_after(
     inv_batcher = InvBatcher()
 
     peer_to_header_q = create_peer_to_header_q(index_hash_work_tuples, inv_batcher)
-    header_to_block_future_q = create_header_to_block_future_q(inv_batcher, input_q=peer_to_header_q)
+    header_to_block_future_q = create_header_to_block_future_q(inv_batcher, input_q=peer_to_header_q, filter_f=filter_f)
 
     def got_addr(peer, name, data):
         pass

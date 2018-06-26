@@ -1,13 +1,16 @@
+from pycoin.networks.registry import network_for_netcode
+
 from pycoinnet.BlockChainView import BlockChainView
 from tests.helper import make_blocks, make_headers
 
 
 def test1():
+    network = network_for_netcode("BTC")
     bcv = BlockChainView()
     assert bcv.last_block_index() == -1
     assert bcv.block_locator_hashes() == [b'\0' * 32]
 
-    blocks = make_blocks(20)
+    blocks = make_blocks(network, 20)
     v = bcv.do_headers_improve_path(blocks)
     assert v == 0
 
