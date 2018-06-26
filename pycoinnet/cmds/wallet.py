@@ -27,6 +27,7 @@ from pycoin.wallet.SQLite3Wallet import SQLite3Wallet
 from pycoinnet.BlockChainView import BlockChainView
 
 from pycoinnet.blockcatchup import fetch_blocks_after
+from pycoinnet.peer_pipeline import get_peer_pipeline
 
 from .common import init_logging
 
@@ -125,8 +126,10 @@ def wallet_fetch(args):
 
     index_hash_work_tuples = blockchain_view.node_tuples
 
+    peer_pipeline = get_peer_pipeline(args.network, args.peer)
+
     for block, last_block_index in fetch_blocks_after(
-            args.network, index_hash_work_tuples, peer_addresses=args.peer,
+            args.network, index_hash_work_tuples, peer_pipeline=peer_pipeline,
             filter_f=filter_f, new_peer_callback=new_peer_callback):
         logging.debug("last_block_index = %s (%s)", last_block_index,
                       datetime.datetime.fromtimestamp(block.timestamp))

@@ -4,12 +4,9 @@ import logging
 from pycoin.message.InvItem import InvItem, ITEM_TYPE_BLOCK
 
 from pycoinnet.BlockChainView import BlockChainView
-from pycoinnet.dnsbootstrap import dns_bootstrap_host_port_q
 from pycoinnet.inv_batcher import InvBatcher
 from pycoinnet.MappingQueue import MappingQueue
-from pycoinnet.Peer import Peer
 from pycoinnet.pong_manager import install_pong_manager
-from pycoinnet.version import version_data_for_peer
 
 
 def create_peer_to_header_q(index_hash_work_tuples, inv_batcher, output_q=None, loop=None):
@@ -89,61 +86,8 @@ def create_header_to_block_future_q(inv_batcher, input_q=None, filter_f=None, lo
         final_q=asyncio.Queue(maxsize=500), loop=loop)
 
 
-def peer_connect_pipeline(network, tcp_connect_workers=30, handshake_workers=3,
-                          host_q=None, loop=None, version_dict={}):
-
-    host_q = host_q or dns_bootstrap_host_port_q(network)
-
-    async def do_tcp_connect(host_port_pair, q):
-        host, port = host_port_pair
-        logging.debug("TCP connecting to %s:%d", host, port)
-        try:
-            reader, writer = await asyncio.open_connection(host=host, port=port)
-            logging.debug("TCP connected to %s:%d", host, port)
-            await q.put((reader, writer))
-        except Exception as ex:
-            logging.info("connect failed: %s:%d (%s)", host, port, ex)
-
-    async def do_peer_handshake(rw_tuple, q):
-        reader, writer = rw_tuple
-        peer = Peer(
-            reader, writer, network.magic_header, network.parse_message,
-            network.pack_message, max_msg_size=10*1024*1024)
-        version_data = version_data_for_peer(peer, **version_dict)
-        peer.version = await peer.perform_handshake(**version_data)
-        if peer.version is None:
-            logging.info("handshake failed on %s", peer)
-            peer.close()
-        else:
-            await q.put(peer)
-
-    filters = [
-        dict(callback_f=do_tcp_connect, input_q=host_q, worker_count=tcp_connect_workers),
-        dict(callback_f=do_peer_handshake, worker_count=handshake_workers),
-    ]
-    return MappingQueue(*filters, loop=loop)
-
-
-def get_peer_pipeline(network, peer_addresses, peer_q):
-    # for now, let's just do one peer
-    host_q = None
-    if peer_addresses:
-        host_q = asyncio.Queue()
-        for peer in peer_addresses:
-            if "/" in peer:
-                host, port = peer.split("/", 1)
-                port = int(port)
-            else:
-                host = peer
-                port = network.default_port
-            host_q.put_nowait((host, port))
-    # BRAIN DAMAGE: 70016 version number is required for bgold new block header format
-    return peer_connect_pipeline(network, host_q=host_q, version_dict=dict(version=70015))
-
-
 def fetch_blocks_after(
-        network, index_hash_work_tuples, peer_addresses=None,
-        filter_f=None, new_peer_callback=None):
+        network, index_hash_work_tuples, peer_pipeline, filter_f=None, new_peer_callback=None):
 
     # yields blocks until we run out
     loop = asyncio.get_event_loop()
@@ -151,7 +95,8 @@ def fetch_blocks_after(
     inv_batcher = InvBatcher()
 
     peer_to_header_q = create_peer_to_header_q(index_hash_work_tuples, inv_batcher)
-    header_to_block_future_q = create_header_to_block_future_q(inv_batcher, input_q=peer_to_header_q, filter_f=filter_f)
+    header_to_block_future_q = create_header_to_block_future_q(
+        inv_batcher, input_q=peer_to_header_q, filter_f=filter_f)
 
     def got_addr(peer, name, data):
         pass
@@ -169,8 +114,6 @@ def fetch_blocks_after(
         if new_peer_callback:
             await new_peer_callback(peer)
         peer.start()
-
-    peer_pipeline = get_peer_pipeline(network, peer_addresses, got_new_peer)
 
     new_peer_q = MappingQueue(
         dict(callback_f=got_new_peer, input_q=peer_pipeline, worker_count=1)
