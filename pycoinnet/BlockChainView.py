@@ -131,8 +131,6 @@ class BlockChainView:
 
     def do_headers_improve_path(self, headers):
         """
-        Raises ValueError if headers path don't extend from anywhere in this view.
-
         Returns False if the headers don't improve the path.
 
         If the headers DO improve the path, return the value of the block index of
