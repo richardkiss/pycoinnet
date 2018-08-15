@@ -19,7 +19,6 @@ from pycoin.encoding.b58 import a2b_hashed_base58
 from pycoin.encoding.hash import hash160
 from pycoin.encoding.hexbytes import b2h_rev
 from pycoin.key.Keychain import Keychain
-from pycoin.key.MultisigKey import parse_MultisigKey
 from pycoin.encoding.hexbytes import b2h, h2b, h2b_rev
 from pycoin.ui.validate import is_address_valid
 from pycoin.networks.registry import network_for_netcode
@@ -30,6 +29,8 @@ from pycoinnet.BlockChainView import BlockChainView
 
 from pycoinnet.blockcatchup import fetch_blocks_after
 from pycoinnet.peer_pipeline import get_peer_pipeline
+
+from .MultisigKey import parse_MultisigKey
 
 from .common import init_logging
 
@@ -77,9 +78,8 @@ class GlobalDB(DB):
         return r[0]
 
 
-class SpendableDB(GlobalDB):
+class SpendableDB(DB):
     def _init_tables(self):
-        super(SpendableDB, self)._init_tables()
         SQL = [
             """
                 create table if not exists Spendable (
@@ -271,6 +271,9 @@ class Wallet:
         self._global_db = global_db
         self._spendable_db = spendable_db
 
+    def ensure_minimal_gap_limit(self):
+        self._interest_finder.ensure_minimal_gap_limit()
+
     def hash160_set(self):
         return self._interest_finder.hash160_set()
 
@@ -293,6 +296,12 @@ class Wallet:
 
     def all_spendables(self, *args, **kwargs):
         return self._spendable_db.all_spendables(*args, **kwargs)
+
+    def spendable_for_hash_index(self, *args, **kwargs):
+        return self._spendable_db.spendable_for_hash_index(*args, **kwargs)
+
+    def save_spendable(self, *args, **kwargs):
+        return self._spendable_db.save_spendable(*args, **kwargs)
 
     def set_last_block_index(self, index):
         self._global_db.set_global("block_index", index)
@@ -414,8 +423,6 @@ def wallet_for_args(args):
     global_db = GlobalDB(sql_path)
     spendable_db = SpendableDB(sql_path)
 
-    interest_finder.ensure_minimal_gap_limit()
-
     return Wallet(interest_finder, global_db, spendable_db)
 
 
@@ -427,6 +434,8 @@ def commit_to_persistence(wallet, blockchain_view, last_block=None):
 
 def wallet_fetch(args):
     wallet = wallet_for_args(args)
+
+    wallet.ensure_minimal_gap_limit()
 
     last_block_index = wallet.last_block_index()
     blockchain_view = wallet.blockchain_view()
@@ -458,6 +467,7 @@ def wallet_fetch(args):
 
     peer_pipeline = get_peer_pipeline(args.network, args.peer)
 
+    last_save_time = time.time()
     for block, last_block_index in fetch_blocks_after(
             args.network, index_hash_work_tuples, peer_pipeline=peer_pipeline,
             filter_f=filter_f, new_peer_callback=new_peer_callback):
@@ -471,11 +481,13 @@ def wallet_fetch(args):
 
         wallet.process_block(block, last_block_index, txs, blockchain_view)
 
-        if last_block_index % 500 == 0:
-            logging.info("at block %06d (%s)" % (
+        now = time.time()
+        if now > last_save_time + 15:
+            logging.info("checkpoint commit at block %06d (%s)" % (
                 last_block_index, datetime.datetime.fromtimestamp(block.timestamp)))
             commit_to_persistence(wallet, blockchain_view, last_block_index)
             wallet.set_last_block_index(last_block_index)
+            last_save_time = time.time()
     commit_to_persistence(wallet, blockchain_view, last_block_index)
 
 
@@ -502,11 +514,11 @@ def as_payable(payable, network):
 
 
 def wallet_tx(args):
-    wallet, persistence, blockchain_view = wallet_persistence_for_args(args)
+    wallet = wallet_for_args(args)
 
     fee = args.fee
 
-    last_block = blockchain_view.last_block_index()
+    last_block = wallet.last_block_index()
 
     # how much are we sending?
     total_sending = 0
@@ -520,7 +532,7 @@ def wallet_tx(args):
 
     total_input_value = 0
     spendables = []
-    unspents = persistence.unspent_spendables(last_block, args.network.tx.Spendable, confirmations=1)
+    unspents = wallet.unspent_spendables(last_block, args.network.tx.Spendable, confirmations=1)
 
     for spendable in unspents:
         spendables.append(spendable)
@@ -544,7 +556,7 @@ def wallet_tx(args):
 
 
 def wallet_exclude(args):
-    basepath, persistence = basepath_persistence_for_args(args)
+    wallet = wallet_for_args(args)
 
     with open(args.path_to_tx, "rb") as f:
         if f.name.endswith("hex"):
@@ -552,11 +564,10 @@ def wallet_exclude(args):
         tx = args.network.tx.parse(f)
 
     for tx_in in tx.txs_in:
-        spendable = persistence.spendable_for_hash_index(tx_in.previous_hash, tx_in.previous_index)
+        spendable = wallet.spendable_for_hash_index(tx_in.previous_hash, tx_in.previous_index, tx.Spendable)
         if spendable:
             spendable.does_seem_spent = True
-            persistence.save_spendable(spendable)
-    persistence.commit()
+            wallet.save_spendable(spendable)
 
 
 def wallet_rewind(args):
@@ -583,14 +594,14 @@ def satoshis_to_amount(s):
 
 def wallet_history(args):
     wallet = wallet_for_args(args)
-    spendables = list(wallet.all_spendables(args.network.tx.Spendable))
 
     spendable_lookup = defaultdict(list)
-    for s in spendables:
+    for s in wallet.all_spendables(args.network.tx.Spendable):
         if s.block_index_available:
             spendable_lookup[s.block_index_available].append(s)
             if s.block_index_spent:
                 spendable_lookup[s.block_index_spent].append(s)
+
     balance = 0
     for bi in sorted(spendable_lookup.keys()):
         if bi == 0:
