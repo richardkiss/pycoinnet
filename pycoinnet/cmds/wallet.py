@@ -401,8 +401,11 @@ def wallet_for_args(args):
 
     sql_path = os.path.join(basepath, "wallet.db")
 
-    hash160_list = [a2b_hashed_base58(a[:-1])[1:] for a in open(
-        os.path.join(basepath, "watch_addresses")).readlines()]
+    try:
+        hash160_list = [a2b_hashed_base58(a[:-1])[1:] for a in open(
+            os.path.join(basepath, "watch_addresses")).readlines()]
+    except OSError:
+        hash160_list = []
 
     keychain = AddressUtils(args.network, sqlite3.Connection(sql_path), hash160_list)
     lines = open(os.path.join(basepath, "multisig_key")).readlines()
