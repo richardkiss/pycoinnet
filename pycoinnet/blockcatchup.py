@@ -76,9 +76,11 @@ def create_header_to_block_future_q(inv_batcher, input_q=None, filter_f=None, lo
 
         for bh, block_index in block_hash_priority_pair_list:
             item_type = filter_f(bh, block_index)
-            if not item_type:
-                continue
-            f = await inv_batcher.inv_item_to_future(InvItem(item_type, bh.hash()), priority=block_index)
+            if item_type:
+                f = await inv_batcher.inv_item_to_future(InvItem(item_type, bh.hash()), priority=block_index)
+            else:
+                f = asyncio.Future()
+                f.set_result(bh)
             await q.put((f, block_index))
 
     return MappingQueue(
