@@ -216,7 +216,7 @@ class InterestFinder:
     def hash160_set(self):
         s = set(self._hash160_set)
         s.update(self._keychain.interested_hashes())
-        return self._hash160_set
+        return s
 
     def _note_interest_in_multisig(self, path):
         address, scripts, original_keys = self._multisig_key.address_preimages_interests()
@@ -372,11 +372,6 @@ class AddressUtils:
             if r:
                 interesting.append(data)
         return interesting
-
-    def hash160_set(self):
-        s = set(self._hash160_set)
-        s.update(self._keychain.interested_hashes())
-        return self._hash160_set
 
 
 def bloom_filter_from_parameters(element_count, false_positive_probability, tweak=1):
