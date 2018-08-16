@@ -5,7 +5,8 @@ import logging
 from pycoin.message.InvItem import InvItem, ITEM_TYPE_TX
 from pycoin.networks.registry import network_for_netcode
 
-from pycoinnet.cmds.common import init_logging, peer_connect_pipeline
+from pycoinnet.cmds.common import init_logging
+from pycoinnet.peer_pipeline import peer_connect_pipeline
 from pycoinnet.dnsbootstrap import dns_bootstrap_host_port_q
 from pycoinnet.pong_manager import install_pong_manager
 
