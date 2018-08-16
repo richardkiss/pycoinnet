@@ -22,8 +22,7 @@ class BlockChainView:
 
     def _add_tuples(self, node_tuples):
         nt = set(tuple(t) for t in node_tuples)
-        self.node_tuples = sorted(set(self.node_tuples).union(nt))
-        self.hash_to_index.update(dict((h, idx) for idx, h, tw in nt))
+        self.node_tuples.extend(sorted(nt))
 
     def as_json(self, **kwargs):
         """
@@ -75,6 +74,10 @@ class BlockChainView:
         idx = self.hash_to_index.get(hash)
         if idx is not None:
             return self.tuple_for_index(idx)
+        for idx, h, tw in self.node_tuples[::-1]:
+            self.hash_to_index[h] = idx
+            if h == hash:
+                return (idx, h, tw)
         return None
 
     def key_index_generator(self):
@@ -162,9 +165,6 @@ class BlockChainView:
             return False
 
         # the headers DO improve things
-
-        old_tuples = self.node_tuples
-        self._set_tuples(t for t in old_tuples if t[0] < new_start_idx)
         self._add_tuples(tuples)
         return new_start_idx
 
