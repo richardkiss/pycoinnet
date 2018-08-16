@@ -40,7 +40,7 @@ class MultisigKey:
             if self._collection_type == self.SEGWIT_NATIVE:
                 h256 = hashlib.sha256(multisig_script).digest()
                 return self._network.ui.address_for_p2s_wit(multisig_script), [multisig_script], subkeys
-        return None, []
+        return None, [], subkeys
 
     def subkey_for_path(self, path):
         new_path = (self._path + path).replace("//", "/")

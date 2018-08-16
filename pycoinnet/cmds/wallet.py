@@ -264,6 +264,11 @@ class InterestFinder:
             self._note_interest_in_multisig("%s/%d" % (rest, _))
         self._keychain.commit()
 
+    def address_for_index(self, index, is_change=False):
+        msk = self._multisig_key.subkey_for_path("%d/%d" % (1 if is_change else 0, index))
+        address, preimages, subkeys = msk.address_preimages_interests()
+        return address
+
 
 class Wallet:
     def __init__(self, interest_finder, global_db, spendable_db):
@@ -347,6 +352,9 @@ class Wallet:
                 self._interest_finder.handle_potential_gap_limit(blob)
 
         blockchain_view.do_headers_improve_path([block])
+
+    def address_for_index(self, *args, **kwargs):
+        return self._interest_finder.address_for_index(*args, **kwargs)
 
 
 class AddressUtils:
@@ -631,6 +639,12 @@ def wallet_history(args):
         print("%7d: %14s" % (bi, satoshi_to_mbtc(balance)))
 
 
+def wallet_address(args):
+    wallet = wallet_for_args(args)
+    for _ in range(100):
+        print(wallet.address_for_index(_))
+
+
 def create_parser():
     parser = argparse.ArgumentParser(description="SPV wallet.")
     parser.add_argument('-p', "--path", help='The path to the wallet files.', default="~/.pycoin/wallet/")
@@ -665,6 +679,8 @@ def create_parser():
     subparsers.add_parser('dump', help="Dump spendables")
     subparsers.add_parser('history', help="Show history")
 
+    subparsers.add_parser('address', help="Dump addresses")
+
     return parser
 
 
@@ -688,6 +704,8 @@ def main():
         wallet_dump(args)
     if args.command == "history":
         wallet_history(args)
+    if args.command == "address":
+        wallet_address(args)
 
 
 if __name__ == '__main__':
