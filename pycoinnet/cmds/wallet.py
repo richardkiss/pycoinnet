@@ -270,6 +270,36 @@ class InterestFinder:
         address, preimages, subkeys = msk.address_preimages_interests()
         return address
 
+    def find_maximal_index(self, path_template):
+
+        def _is_interested(index):
+            path = path_template % index
+            msk = self._multisig_key.subkey_for_path(path)
+            address, preimages, subkeys = msk.address_preimages_interests()
+            if preimages:
+                # preimages[0] is the one that is used in the p2s
+                return self._keychain.p2s_for_hash(hash160(preimages[0]))
+            else:
+                return self._keychain.path_for_hash160(subkeys[0].hash160())
+
+        lower_bound, upper_bound = 0, 1
+        while _is_interested(upper_bound):
+            lower_bound = upper_bound
+            upper_bound += upper_bound
+
+        # binary search
+        # we want the last one where _is_interested is true
+        # we know _is_interested is true for lower_bound and false for upper_bound
+
+        while lower_bound + 1 < upper_bound:
+            trial = (lower_bound + upper_bound) // 2
+            assert trial < upper_bound
+            if _is_interested(trial):
+                lower_bound = trial
+            else:
+                upper_bound = trial
+        return lower_bound
+
 
 class Wallet:
     def __init__(self, interest_finder, global_db, spendable_db):
@@ -644,8 +674,10 @@ def wallet_history(args):
 
 def wallet_address(args):
     wallet = wallet_for_args(args)
-    for _ in range(100):
-        print(wallet.address_for_index(_))
+    template = "1/%d" if args.change else "0/%d"
+    max_index = wallet._interest_finder.find_maximal_index(template)
+    for _ in range(max_index+1):
+        print("%s: %s" % (template % _, wallet.address_for_index(_)))
 
 
 def create_parser():
