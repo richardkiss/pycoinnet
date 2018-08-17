@@ -27,7 +27,7 @@ from pycoin.coins.tx_utils import create_tx
 
 from pycoinnet.BlockChainView import BlockChainView
 
-from pycoinnet.blockcatchup import fetch_blocks_after
+from pycoinnet.blockcatchup import fetch_blocks_after, headers_until_timestamp
 from pycoinnet.peer_pipeline import get_peer_pipeline
 from pycoinnet.PeerManager import PeerManager
 
@@ -480,7 +480,11 @@ def wallet_fetch(args):
     peer_pipeline = get_peer_pipeline(args.network, args.peer)
     peer_manager = PeerManager(peer_pipeline, args.count, got_new_peer)
 
-    # BRAIN DAMAGE TODO: explicitly skip ahead past early_timestamp
+    index_hash_work_tuples = blockchain_view.node_tuples
+
+    # explicitly skip ahead past early_timestamp
+    headers = headers_until_timestamp(index_hash_work_tuples, peer_manager, early_timestamp)
+    blockchain_view.do_headers_improve_path(headers)
 
     def filter_f(bh, pri):
         if bh.timestamp >= early_timestamp:
@@ -493,8 +497,6 @@ def wallet_fetch(args):
         if args.spv:
             peer.send_msg("filterload", filter=filter_bytes, tweak=tweak,
                           hash_function_count=hash_function_count, flags=flags)
-
-    index_hash_work_tuples = blockchain_view.node_tuples
 
     last_save_time = time.time()
     for block, last_block_index in fetch_blocks_after(

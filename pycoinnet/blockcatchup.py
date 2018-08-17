@@ -93,8 +93,38 @@ def create_header_to_block_future_q(inv_batcher, input_q=None, filter_f=None, lo
         final_q=asyncio.Queue(maxsize=500), loop=loop)
 
 
-def create_headers_until_timestamp_q(network, peer_manager):
-    pass
+def headers_until_timestamp(index_hash_work_tuples, peer_manager, timestamp):
+
+    loop = asyncio.get_event_loop()
+
+    inv_batcher = InvBatcher()
+    async def got_new_peer(peer, q):
+        await inv_batcher.add_peer(peer)
+    new_peer_q = MappingQueue(
+        dict(callback_f=got_new_peer, input_q=peer_manager.new_peer_pipeline(), worker_count=1)
+    )
+
+    peer_to_header_q = create_peer_to_header_q(index_hash_work_tuples, inv_batcher)
+    peer_manager.new_peer_pipeline(peer_to_header_q)
+
+    first_block = None
+    headers = []
+    while True:
+        r = loop.run_until_complete(peer_to_header_q.get())
+        if r is None:
+            break
+        initial_block, more_headers = r
+        if first_block is None:
+            first_block = initial_block
+        for h in more_headers:
+            if h.timestamp < timestamp:
+                headers.append(h)
+            else:
+                break
+        else:
+            continue
+        break
+    return headers
 
 
 def create_fetch_blocks_after_q(
@@ -103,19 +133,17 @@ def create_fetch_blocks_after_q(
     # return a Queue that gets filled with blocks until we run out
 
     inv_batcher = InvBatcher()
-
-    peer_to_header_q = create_peer_to_header_q(index_hash_work_tuples, inv_batcher)
-
-    header_to_block_future_q = create_header_to_block_future_q(
-        inv_batcher, input_q=peer_to_header_q, filter_f=filter_f)
-
     async def got_new_peer(peer, q):
         await inv_batcher.add_peer(peer)
-
     new_peer_q = MappingQueue(
         dict(callback_f=got_new_peer, input_q=peer_manager.new_peer_pipeline(), worker_count=1)
     )
+
+    peer_to_header_q = create_peer_to_header_q(index_hash_work_tuples, inv_batcher)
     peer_manager.new_peer_pipeline(peer_to_header_q)
+
+    header_to_block_future_q = create_header_to_block_future_q(
+        inv_batcher, input_q=peer_to_header_q, filter_f=filter_f)
 
     async def header_to_block(next_item, q):
         if next_item is None:
