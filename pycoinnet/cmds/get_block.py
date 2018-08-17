@@ -8,7 +8,6 @@ from pycoin.networks.registry import network_codes, network_for_netcode
 from pycoinnet.blockcatchup import create_peer_to_header_q
 from pycoinnet.dnsbootstrap import dns_bootstrap_host_port_q
 from pycoinnet.cmds.common import init_logging
-from pycoinnet.MappingQueue import MappingQueue
 from pycoinnet.inv_batcher import InvBatcher
 from pycoinnet.peer_pipeline import create_hostport_to_peers_q
 from pycoinnet.pong_manager import install_pong_manager

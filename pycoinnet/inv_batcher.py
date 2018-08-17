@@ -75,7 +75,7 @@ class InvBatcher:
 
         self._peer_batch_queue = MappingQueue(
             dict(callback_f=batch_getdata_fetches),
-            dict(callback_f=fetch_batch, input_q_maxsize=2, worker_count=2),
+            dict(callback_f=fetch_batch, input_q_maxsize=2, worker_count=20),
         )
 
         self._inv_item_hash_to_future = weakref.WeakValueDictionary()

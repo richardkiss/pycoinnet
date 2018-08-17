@@ -10,6 +10,8 @@ def dns_bootstrap_host_port_q(network, output_q=None, getaddrinfo=asyncio.get_ev
     """
 
     async def flatten(items, q):
+        if items is None:
+            return
         for item in items:
             await q.put(item)
 
