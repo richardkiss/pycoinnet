@@ -6,7 +6,6 @@ from pycoin.message.InvItem import InvItem, ITEM_TYPE_BLOCK
 from pycoinnet.BlockChainView import BlockChainView
 from pycoinnet.inv_batcher import InvBatcher
 from pycoinnet.MappingQueue import MappingQueue
-from pycoinnet.pong_manager import install_pong_manager
 
 
 def create_peer_to_header_q(index_hash_work_tuples, inv_batcher, output_q=None, timeout=10.0, loop=None):
@@ -82,7 +81,8 @@ def create_header_to_block_future_q(inv_batcher, input_q=None, filter_f=None, lo
         for bh, block_index in block_hash_priority_pair_list:
             item_type = filter_f(bh, block_index)
             if item_type:
-                f = await inv_batcher.inv_item_to_future(InvItem(item_type, bh.hash()), priority=block_index)
+                f = await inv_batcher.inv_item_to_future(
+                    InvItem(item_type, bh.hash()), priority=block_index)
             else:
                 f = asyncio.Future()
                 f.set_result(bh)
@@ -93,37 +93,29 @@ def create_header_to_block_future_q(inv_batcher, input_q=None, filter_f=None, lo
         final_q=asyncio.Queue(maxsize=500), loop=loop)
 
 
-def create_fetch_blocks_after_q(
-        network, index_hash_work_tuples, peer_pipeline, filter_f=None, new_peer_callback=None):
+def create_headers_until_timestamp_q(network, peer_manager):
+    pass
 
-    # yields blocks until we run out
+
+def create_fetch_blocks_after_q(
+        network, index_hash_work_tuples, peer_manager, filter_f=None, new_peer_callback=None):
+
+    # return a Queue that gets filled with blocks until we run out
 
     inv_batcher = InvBatcher()
 
     peer_to_header_q = create_peer_to_header_q(index_hash_work_tuples, inv_batcher)
+
     header_to_block_future_q = create_header_to_block_future_q(
         inv_batcher, input_q=peer_to_header_q, filter_f=filter_f)
 
-    def got_addr(peer, name, data):
-        pass
-
     async def got_new_peer(peer, q):
-        install_pong_manager(peer)
-        peer.set_request_callback("alert", lambda *args: None)
-        peer.set_request_callback("addr", got_addr)
-        peer.set_request_callback("inv", lambda *args: None)
-        peer.set_request_callback("feefilter", lambda *args: None)
-        peer.set_request_callback("sendheaders", lambda *args: None)
-        peer.set_request_callback("sendcmpct", lambda *args: None)
-        await peer_to_header_q.put(peer)
         await inv_batcher.add_peer(peer)
-        if new_peer_callback:
-            await new_peer_callback(peer)
-        peer.start()
 
     new_peer_q = MappingQueue(
-        dict(callback_f=got_new_peer, input_q=peer_pipeline, worker_count=1)
+        dict(callback_f=got_new_peer, input_q=peer_manager.new_peer_pipeline(), worker_count=1)
     )
+    peer_manager.new_peer_pipeline(peer_to_header_q)
 
     async def header_to_block(next_item, q):
         if next_item is None:
@@ -151,15 +143,14 @@ def create_fetch_blocks_after_q(
     return block_index_q
 
 
-
 def fetch_blocks_after(
-        network, index_hash_work_tuples, peer_pipeline, filter_f=None, new_peer_callback=None):
+        network, index_hash_work_tuples, peer_manager, filter_f=None, new_peer_callback=None):
 
     # yields blocks until we run out
     loop = asyncio.get_event_loop()
 
     block_index_q = create_fetch_blocks_after_q(
-        network, index_hash_work_tuples, peer_pipeline, filter_f, new_peer_callback)
+        network, index_hash_work_tuples, peer_manager, filter_f, new_peer_callback)
 
     while True:
         v = loop.run_until_complete(block_index_q.get())

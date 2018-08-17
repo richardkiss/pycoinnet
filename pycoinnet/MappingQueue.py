@@ -151,6 +151,9 @@ class MappingQueue:
     def empty(self):
         return self._out_q.empty()
 
+    def full(self):
+        return self._in_q.full()
+
     def task_done(self):
         return self._out_q.task_done()
 

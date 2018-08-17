@@ -190,7 +190,6 @@ class SpendableDB(DB):
 
 class InterestFinder:
     def __init__(self, path, network, hash160_list, multisig_key):
-        self._path = path
         self._network = network
         self._hash160_set = set(hash160_list)
         self._keychain = Keychain(sqlite3.connect(path))
@@ -389,31 +388,6 @@ class Wallet:
         return self._interest_finder.address_for_index(*args, **kwargs)
 
 
-class AddressUtils:
-    def __init__(self, network, sqlite3_db, hash160_items=[]):
-        self._hash160_set = set(hash160_items)
-        self._network = network
-        self._keychain = Keychain(sqlite3_db)
-
-    def is_spendable_interesting(self, spendable):
-        return len(self.interesting_blobs(spendable)) > 0
-
-    def interesting_blobs(self, spendable):
-        interesting = []
-        for opcode, data, pc, new_pc in self._network.extras.ScriptTools.get_opcodes(spendable.script):
-            if data in self._hash160_set:
-                interesting.append(data)
-                continue
-            r = self._keychain.path_for_hash160(data)
-            if r:
-                interesting.append(data)
-                continue
-            r = self._keychain.p2s_for_hash(data)
-            if r:
-                interesting.append(data)
-        return interesting
-
-
 def bloom_filter_from_parameters(element_count, false_positive_probability, tweak=1):
     filter_size = filter_size_required(element_count, false_positive_probability)
     hash_function_count = hash_function_count_required(filter_size, element_count)
@@ -447,7 +421,6 @@ def wallet_for_args(args):
     except OSError:
         hash160_list = []
 
-    keychain = AddressUtils(args.network, sqlite3.Connection(sql_path), hash160_list)
     lines = open(os.path.join(basepath, "multisig_key")).readlines()
 
     multisig_key = None
@@ -470,6 +443,23 @@ def commit_to_persistence(wallet, blockchain_view, last_block=None):
     wallet.set_blockchain_view(blockchain_view)
 
 
+async def got_new_peer(peer):
+
+    def got_addr(peer, name, data):
+        pass
+
+    from pycoinnet.pong_manager import install_pong_manager
+
+    install_pong_manager(peer)
+    peer.set_request_callback("alert", lambda *args: None)
+    peer.set_request_callback("addr", got_addr)
+    peer.set_request_callback("inv", lambda *args: None)
+    peer.set_request_callback("feefilter", lambda *args: None)
+    peer.set_request_callback("sendheaders", lambda *args: None)
+    peer.set_request_callback("sendcmpct", lambda *args: None)
+    peer.start()
+
+
 def wallet_fetch(args):
     wallet = wallet_for_args(args)
 
@@ -488,7 +478,7 @@ def wallet_fetch(args):
     early_timestamp = calendar.timegm(args.date)
 
     peer_pipeline = get_peer_pipeline(args.network, args.peer)
-    peer_manager = PeerManager(peer_pipeline, args.count)
+    peer_manager = PeerManager(peer_pipeline, args.count, got_new_peer)
 
     # BRAIN DAMAGE TODO: explicitly skip ahead past early_timestamp
 
@@ -508,7 +498,7 @@ def wallet_fetch(args):
 
     last_save_time = time.time()
     for block, last_block_index in fetch_blocks_after(
-            args.network, index_hash_work_tuples, peer_pipeline=peer_manager.new_peer_pipeline(),
+            args.network, index_hash_work_tuples, peer_manager=peer_manager,
             filter_f=filter_f, new_peer_callback=new_peer_callback):
         logging.debug("last_block_index = %s (%s)", last_block_index,
                       datetime.datetime.fromtimestamp(block.timestamp))
@@ -695,14 +685,16 @@ def create_parser():
 
     fetch_parser.add_argument(
         "peer", metavar="peer_ip[/port]", help="Fetch from this peer.", type=str, nargs="*")
-    fetch_parser.add_argument("-s", "--spv", help="Use SPV-style merkle blocks (CURRENTLY UNRELIABLE).", action="store_true")
     fetch_parser.add_argument("-c", "--count", help="Peer count", default=8, type=int)
+    fetch_parser.add_argument(
+        "-s", "--spv", help="Use SPV-style merkle blocks (CURRENTLY UNRELIABLE).", action="store_true")
 
     balance_parser = subparsers.add_parser('balance', help='Show wallet balance')
     balance_parser.add_argument("block", help="balance as of block", nargs="?", type=int)
 
     create_parser = subparsers.add_parser('tx', help='Create transaction')
-    create_parser.add_argument("-o", "--output", metavar="OUTPUT_FILENAME", type=str, help="name of tx output file", required=True)
+    create_parser.add_argument(
+        "-o", "--output", metavar="OUTPUT_FILENAME", type=str, help="name of tx output file", required=True)
     create_parser.add_argument("-F", "--fee", type=int, help="fee in satoshis", default=1000)
     create_parser.add_argument('payable', nargs='+',
                                help="payable: either a bitcoin address, or an address/amount combo")

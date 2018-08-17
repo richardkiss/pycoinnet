@@ -7,7 +7,8 @@ from pycoinnet.MappingQueue import MappingQueue
 
 
 class InvBatcher:
-    def __init__(self, target_batch_time=10, max_batch_time=30, max_batch_size=500, inv_item_future_q_maxsize=1000):
+    def __init__(self, target_batch_time=10, max_batch_time=30,
+                 max_batch_size=500, inv_item_future_q_maxsize=1000):
 
         self._is_closing = False
         self._inv_item_future_queue = asyncio.PriorityQueue(maxsize=inv_item_future_q_maxsize)
@@ -133,7 +134,8 @@ class InvBatcher:
 
     def handle_merkle_block_event(self, peer, name, data):
         item = data["header"]
-        item.tx_futures = [self.register_interest(InvItem(ITEM_TYPE_TX, tx_hash)) for tx_hash in data["tx_hashes"]]
+        item.tx_futures = [self.register_interest(
+            InvItem(ITEM_TYPE_TX, tx_hash)) for tx_hash in data["tx_hashes"]]
         self._handle_inv_response(peer, ITEM_TYPE_MERKLEBLOCK, item)
 
     def handle_tx_event(self, peer, name, data):
