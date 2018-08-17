@@ -69,6 +69,11 @@ class MappingQueue:
         input_q_maxsize: the maxsize of the Queue
         worker_count: maximum number of tasks pulling from the queue. Default is 1
         callback_f: a function called with the item and the output_q, into which it may put items
+
+        There are two ways to end:
+            stop: that means no more items will be added. Once a queue is empty, the workers at that
+                stage terminate and "stop" is sent to the next stage
+            cancel: no more results will be processed, so cancel immediately propogates to all stages.
         """
         loop = loop or asyncio.get_event_loop()
 

@@ -88,11 +88,10 @@ def create_header_to_block_future_q(inv_batcher, input_q=None, filter_f=None, lo
         final_q=asyncio.Queue(maxsize=500), loop=loop)
 
 
-def fetch_blocks_after(
+def create_fetch_blocks_after_q(
         network, index_hash_work_tuples, peer_pipeline, filter_f=None, new_peer_callback=None):
 
     # yields blocks until we run out
-    loop = asyncio.get_event_loop()
 
     inv_batcher = InvBatcher()
 
@@ -121,19 +120,43 @@ def fetch_blocks_after(
         dict(callback_f=got_new_peer, input_q=peer_pipeline, worker_count=1)
     )
 
-    while True:
-        v = loop.run_until_complete(header_to_block_future_q.get())
-        if v is None:
-            break
-        block_future, index = v
-        block = loop.run_until_complete(block_future)
+    async def header_to_block(next_item, q):
+        if next_item is None:
+            await q.put(None)
+            peer_to_header_q.stop()
+            header_to_block_future_q.stop()
+            new_peer_q.stop()
+            await peer_to_header_q.wait()
+            await header_to_block_future_q.wait()
+            await new_peer_q.wait()
+            return
+        block_future, index = next_item
+        block = await block_future
         if hasattr(block, "tx_futures"):
             txs = []
             for f in block.tx_futures:
-                txs.append(loop.run_until_complete(f))
+                txs.append(await f)
             block.txs = txs
-        yield block, index
+        await q.put((block, index))
 
-    peer_to_header_q.stop()
-    header_to_block_future_q.stop()
-    new_peer_q.stop()
+    block_index_q = MappingQueue(
+        dict(callback_f=header_to_block, input_q=header_to_block_future_q, worker_count=1)
+    )
+
+    return block_index_q
+
+
+
+def fetch_blocks_after(
+        network, index_hash_work_tuples, peer_pipeline, filter_f=None, new_peer_callback=None):
+
+    # yields blocks until we run out
+    loop = asyncio.get_event_loop()
+
+    block_index_q = create_fetch_blocks_after_q(network, index_hash_work_tuples, peer_pipeline, filter_f, new_peer_callback)
+
+    while True:
+        v = loop.run_until_complete(block_index_q.get())
+        if v is None:
+            break
+        yield v
