@@ -29,6 +29,7 @@ from pycoinnet.BlockChainView import BlockChainView
 
 from pycoinnet.blockcatchup import fetch_blocks_after
 from pycoinnet.peer_pipeline import get_peer_pipeline
+from pycoinnet.PeerManager import PeerManager
 
 from .MultisigKey import parse_MultisigKey
 
@@ -314,6 +315,7 @@ class Wallet:
     def rewind(self, block_index):
         self.set_last_block_index(block_index-1)
         self._spendable_db.rewind_spendables(block_index)
+        self._spendable_db.commit()
 
     def process_confirmed_spendables(self, new_spendables_and_blobs, block_index):
         for spendable, blobs in new_spendables_and_blobs:
@@ -455,27 +457,28 @@ def wallet_fetch(args):
 
     early_timestamp = calendar.timegm(args.date)
 
+    peer_pipeline = get_peer_pipeline(args.network, args.peer)
+    peer_manager = PeerManager(peer_pipeline, args.count)
+
     # BRAIN DAMAGE TODO: explicitly skip ahead past early_timestamp
 
     def filter_f(bh, pri):
         if bh.timestamp >= early_timestamp:
-            return ITEM_TYPE_BLOCK
-            return ITEM_TYPE_MERKLEBLOCK
+            return ITEM_TYPE_MERKLEBLOCK if args.spv else ITEM_TYPE_BLOCK
 
     filter_bytes, hash_function_count, tweak = bloom_filter.filter_load_params()
     flags = 1  # BLOOM_UPDATE_ALL = 1  # BRAIN DAMAGE
 
     async def new_peer_callback(peer):
-        peer.send_msg("filterload", filter=filter_bytes, tweak=tweak,
-                      hash_function_count=hash_function_count, flags=flags)
+        if args.spv:
+            peer.send_msg("filterload", filter=filter_bytes, tweak=tweak,
+                          hash_function_count=hash_function_count, flags=flags)
 
     index_hash_work_tuples = blockchain_view.node_tuples
 
-    peer_pipeline = get_peer_pipeline(args.network, args.peer)
-
     last_save_time = time.time()
     for block, last_block_index in fetch_blocks_after(
-            args.network, index_hash_work_tuples, peer_pipeline=peer_pipeline,
+            args.network, index_hash_work_tuples, peer_pipeline=peer_manager.new_peer_pipeline(),
             filter_f=filter_f, new_peer_callback=new_peer_callback):
         logging.debug("last_block_index = %s (%s)", last_block_index,
                       datetime.datetime.fromtimestamp(block.timestamp))
@@ -660,6 +663,8 @@ def create_parser():
 
     fetch_parser.add_argument(
         "peer", metavar="peer_ip[/port]", help="Fetch from this peer.", type=str, nargs="*")
+    fetch_parser.add_argument("-s", "--spv", help="Use SPV-style merkle blocks (CURRENTLY UNRELIABLE).", action="store_true")
+    fetch_parser.add_argument("-c", "--count", help="Peer count", default=8, type=int)
 
     balance_parser = subparsers.add_parser('balance', help='Show wallet balance')
     balance_parser.add_argument("block", help="balance as of block", nargs="?", type=int)
@@ -679,7 +684,8 @@ def create_parser():
     subparsers.add_parser('dump', help="Dump spendables")
     subparsers.add_parser('history', help="Show history")
 
-    subparsers.add_parser('address', help="Dump addresses")
+    address_parser = subparsers.add_parser('address', help="Dump addresses")
+    address_parser.add_argument("-c", "--change", action="store_true", help="display change addresses")
 
     return parser
 

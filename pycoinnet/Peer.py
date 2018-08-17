@@ -26,6 +26,7 @@ class Peer:
         self._request_callbacks = dict()
         self._response_futures = dict()
         self._task = None
+        self._is_closed = asyncio.Future()
         # stats
         self._bytes_read = 0
         self._bytes_writ = 0
@@ -90,6 +91,7 @@ class Peer:
         self._writer.write_eof()
 
     def close(self):
+        self._is_closed.set_result(None)
         self._writer.close()
 
     def is_closing(self):
@@ -150,9 +152,10 @@ class Peer:
                 del self._response_futures[name]
             else:
                 logging.error("unhandled event %s %s", event[0], event[1])
+        self.close()
 
     async def wait_until_close(self):
-        await self._task
+        await self._is_closed
 
     def __repr__(self):
         return "<Peer %s>" % str(self.peername())

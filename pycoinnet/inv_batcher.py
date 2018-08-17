@@ -7,7 +7,7 @@ from pycoinnet.MappingQueue import MappingQueue
 
 
 class InvBatcher:
-    def __init__(self, target_batch_time=10, max_batch_size=500, inv_item_future_q_maxsize=1000):
+    def __init__(self, target_batch_time=10, max_batch_time=30, max_batch_size=500, inv_item_future_q_maxsize=1000):
 
         self._is_closing = False
         self._inv_item_future_queue = asyncio.PriorityQueue(maxsize=inv_item_future_q_maxsize)
@@ -40,19 +40,36 @@ class InvBatcher:
             peer.send_msg("getdata", items=inv_items)
             start_time = loop.time()
             futures = [f for (priority, bh, f, peers_tried) in batch]
-            await asyncio.wait(futures, timeout=target_batch_time)
-            end_time = loop.time()
-            batch_time = end_time - start_time
-            logging.debug("completed batch size %d in %f s from %s", len(inv_items), batch_time, peer)
-            completed_count = sum([1 for f in futures if f.done()])
-            item_per_unit_time = completed_count / batch_time
-            new_batch_size = min(prior_max * 4, int(target_batch_time * item_per_unit_time + 0.5))
-            new_batch_size = min(max(1, new_batch_size), max_batch_size)
-            logging.debug("new batch size for %s is %d", peer, new_batch_size)
+
+            complete_count = 0
+            while True:
+                last_complete_count = complete_count
+                await asyncio.wait(futures, timeout=target_batch_time)
+                batch_time = loop.time() - start_time
+
+                complete_count = sum([1 for _ in futures if _.done()])
+                if complete_count == len(futures):
+                    break
+
+                if last_complete_count >= complete_count or batch_time > max_batch_time:
+                    break
+
             for (priority, inv_item, f, peers_tried) in batch:
                 if not f.done():
                     peers_tried.add(peer)
                     await self._inv_item_future_queue.put((priority, inv_item, f, peers_tried))
+
+            logging.debug("got %d of %d batch items in %f s from %s", complete_count,
+                          len(inv_items), batch_time, peer)
+
+            if peer.is_closing():
+                logging.debug("peer closing %s", peer)
+                return
+
+            item_per_unit_time = complete_count / batch_time
+            new_batch_size = min(prior_max * 4, int(target_batch_time * item_per_unit_time + 0.5))
+            new_batch_size = min(max(1, new_batch_size), max_batch_size)
+            logging.debug("new batch size for %s is %d", peer, new_batch_size)
             await self._peer_batch_queue.put((peer, new_batch_size))
 
         self._peer_batch_queue = MappingQueue(
@@ -100,7 +117,7 @@ class InvBatcher:
             f.add_done_callback(remove_later)
         return f
 
-    def _handle_inv_response(self, item_type, item):
+    def _handle_inv_response(self, peer, item_type, item):
         item_hash = item.hash()
         inv_item = InvItem(item_type, item_hash)
         if inv_item in self._inv_item_hash_to_future:
@@ -108,17 +125,17 @@ class InvBatcher:
             if not f.done():
                 f.set_result(item)
         else:
-            logging.error("missing future for item %s", item.id())
+            logging.error("missing future for item %s from %s", item.id(), peer)
 
     def handle_block_event(self, peer, name, data):
         item = data["block" if name == "block" else "header"]
-        self._handle_inv_response(ITEM_TYPE_BLOCK, item)
+        self._handle_inv_response(peer, ITEM_TYPE_BLOCK, item)
 
     def handle_merkle_block_event(self, peer, name, data):
         item = data["header"]
         item.tx_futures = [self.register_interest(InvItem(ITEM_TYPE_TX, tx_hash)) for tx_hash in data["tx_hashes"]]
-        self._handle_inv_response(ITEM_TYPE_MERKLEBLOCK, item)
+        self._handle_inv_response(peer, ITEM_TYPE_MERKLEBLOCK, item)
 
     def handle_tx_event(self, peer, name, data):
         item = data["tx"]
-        self._handle_inv_response(ITEM_TYPE_TX, item)
+        self._handle_inv_response(peer, ITEM_TYPE_TX, item)

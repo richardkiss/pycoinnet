@@ -9,7 +9,7 @@ from pycoinnet.MappingQueue import MappingQueue
 from pycoinnet.pong_manager import install_pong_manager
 
 
-def create_peer_to_header_q(index_hash_work_tuples, inv_batcher, output_q=None, loop=None):
+def create_peer_to_header_q(index_hash_work_tuples, inv_batcher, output_q=None, timeout=10.0, loop=None):
     # create and return a Mapping Queue that takes peers as input
     # and produces tuples of (initial_block, [headers]) as output
 
@@ -21,11 +21,16 @@ def create_peer_to_header_q(index_hash_work_tuples, inv_batcher, output_q=None, 
         block_locator_hashes = blockchain_view.block_locator_hashes()
         hash_stop = blockchain_view.hash_initial_block()
         logging.debug("getting headers after %d", blockchain_view.last_block_tuple()[0])
-        # BRAIN DAMAGE: need a timeout here
-        data = await peer.request_response(
-            "getheaders", "headers", version=1,
-            hashes=block_locator_hashes, hash_stop=hash_stop)
-        headers = [bh for bh, t in data["headers"]]
+
+        headers = []
+        if not peer.is_closing():
+            request = peer.request_response(
+                "getheaders", "headers", version=1,
+                hashes=block_locator_hashes, hash_stop=hash_stop)
+            done, pending = await asyncio.wait([request], timeout=timeout)
+            if done:
+                data = await done.pop()
+                headers = [bh for bh, t in data["headers"]]
 
         while len(headers) > 0 and headers[0].previous_block_hash != blockchain_view.last_block_tuple()[1]:
             # this hack is necessary because the stupid default client
@@ -153,7 +158,8 @@ def fetch_blocks_after(
     # yields blocks until we run out
     loop = asyncio.get_event_loop()
 
-    block_index_q = create_fetch_blocks_after_q(network, index_hash_work_tuples, peer_pipeline, filter_f, new_peer_callback)
+    block_index_q = create_fetch_blocks_after_q(
+        network, index_hash_work_tuples, peer_pipeline, filter_f, new_peer_callback)
 
     while True:
         v = loop.run_until_complete(block_index_q.get())
