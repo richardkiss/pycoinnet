@@ -26,6 +26,7 @@ from pycoin.message.InvItem import ITEM_TYPE_BLOCK, ITEM_TYPE_MERKLEBLOCK
 from pycoin.coins.tx_utils import create_tx
 
 from pycoinnet.BlockChainView import BlockChainView
+from pycoinnet.inv_batcher import InvBatcher
 
 from pycoinnet.blockcatchup import fetch_blocks_after, headers_until_timestamp
 from pycoinnet.peer_pipeline import get_peer_pipeline
@@ -443,23 +444,6 @@ def commit_to_persistence(wallet, blockchain_view, last_block=None):
     wallet.set_blockchain_view(blockchain_view)
 
 
-async def got_new_peer(peer):
-
-    def got_addr(peer, name, data):
-        pass
-
-    from pycoinnet.pong_manager import install_pong_manager
-
-    install_pong_manager(peer)
-    peer.set_request_callback("alert", lambda *args: None)
-    peer.set_request_callback("addr", got_addr)
-    peer.set_request_callback("inv", lambda *args: None)
-    peer.set_request_callback("feefilter", lambda *args: None)
-    peer.set_request_callback("sendheaders", lambda *args: None)
-    peer.set_request_callback("sendcmpct", lambda *args: None)
-    peer.start()
-
-
 def wallet_fetch(args):
     wallet = wallet_for_args(args)
 
@@ -477,13 +461,34 @@ def wallet_fetch(args):
 
     early_timestamp = calendar.timegm(args.date)
 
+    async def got_new_peer(peer):
+
+        def got_addr(peer, name, data):
+            pass
+
+        from pycoinnet.pong_manager import install_pong_manager
+
+        install_pong_manager(peer)
+        peer.set_request_callback("alert", lambda *args: None)
+        peer.set_request_callback("addr", got_addr)
+        peer.set_request_callback("inv", lambda *args: None)
+        peer.set_request_callback("feefilter", lambda *args: None)
+        peer.set_request_callback("sendheaders", lambda *args: None)
+        peer.set_request_callback("sendcmpct", lambda *args: None)
+        if args.spv:
+            peer.send_msg("filterload", filter=filter_bytes, tweak=tweak,
+                          hash_function_count=hash_function_count, flags=flags)
+        peer.start()
+
     peer_pipeline = get_peer_pipeline(args.network, args.peer)
     peer_manager = PeerManager(peer_pipeline, args.count, got_new_peer)
 
     index_hash_work_tuples = blockchain_view.node_tuples
 
+    inv_batcher = InvBatcher(peer_manager)
+
     # explicitly skip ahead past early_timestamp
-    headers = headers_until_timestamp(index_hash_work_tuples, peer_manager, early_timestamp)
+    headers = headers_until_timestamp(inv_batcher, index_hash_work_tuples, peer_manager, early_timestamp)
     blockchain_view.do_headers_improve_path(headers)
 
     def filter_f(bh, pri):
@@ -492,11 +497,6 @@ def wallet_fetch(args):
 
     filter_bytes, hash_function_count, tweak = bloom_filter.filter_load_params()
     flags = 1  # BLOOM_UPDATE_ALL = 1  # BRAIN DAMAGE
-
-    async def new_peer_callback(peer):
-        if args.spv:
-            peer.send_msg("filterload", filter=filter_bytes, tweak=tweak,
-                          hash_function_count=hash_function_count, flags=flags)
 
     last_save_time = time.time()
     for block, last_block_index in fetch_blocks_after(

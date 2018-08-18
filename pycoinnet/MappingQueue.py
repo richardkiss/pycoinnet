@@ -128,6 +128,11 @@ class MappingQueue:
     async def wait(self):
         await self._out_q._is_stopping_future
 
+    async def drain(self):
+        self.stop()
+        while not self._out_q._is_stopping_future.done():
+            await self.get()
+
     def cancel(self):
         if getattr(self, "_cancel_function", None):
             self._cancel_function()

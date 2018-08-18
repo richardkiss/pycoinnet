@@ -7,7 +7,7 @@ from pycoinnet.MappingQueue import MappingQueue
 
 
 class InvBatcher:
-    def __init__(self, target_batch_time=10, max_batch_time=30,
+    def __init__(self, peer_manager, target_batch_time=10, max_batch_time=30,
                  max_batch_size=500, inv_item_future_q_maxsize=1000):
 
         self._is_closing = False
@@ -79,6 +79,13 @@ class InvBatcher:
         )
 
         self._inv_item_hash_to_future = weakref.WeakValueDictionary()
+
+        async def got_new_peer(peer, q):
+            await self.add_peer(peer)
+
+        self._new_peer_q = MappingQueue(
+            dict(callback_f=got_new_peer, input_q=peer_manager.new_peer_pipeline(), worker_count=1)
+        )
 
     async def inv_item_to_future(self, inv_item, priority=0):
         f = self._inv_item_hash_to_future.get(inv_item)
