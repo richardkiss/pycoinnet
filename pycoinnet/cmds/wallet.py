@@ -461,6 +461,9 @@ def wallet_fetch(args):
 
     early_timestamp = calendar.timegm(args.date)
 
+    filter_bytes, hash_function_count, tweak = bloom_filter.filter_load_params()
+    flags = 1  # BLOOM_UPDATE_ALL = 1  # BRAIN DAMAGE
+
     async def got_new_peer(peer):
 
         def got_addr(peer, name, data):
@@ -495,13 +498,9 @@ def wallet_fetch(args):
         if bh.timestamp >= early_timestamp:
             return ITEM_TYPE_MERKLEBLOCK if args.spv else ITEM_TYPE_BLOCK
 
-    filter_bytes, hash_function_count, tweak = bloom_filter.filter_load_params()
-    flags = 1  # BLOOM_UPDATE_ALL = 1  # BRAIN DAMAGE
-
     last_save_time = time.time()
     for block, last_block_index in fetch_blocks_after(
-            args.network, index_hash_work_tuples, peer_manager=peer_manager,
-            filter_f=filter_f, new_peer_callback=new_peer_callback):
+            inv_batcher, index_hash_work_tuples, peer_manager=peer_manager, filter_f=filter_f):
         logging.debug("last_block_index = %s (%s)", last_block_index,
                       datetime.datetime.fromtimestamp(block.timestamp))
         txs = block.txs

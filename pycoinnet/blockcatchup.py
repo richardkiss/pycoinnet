@@ -7,13 +7,13 @@ from pycoinnet.BlockChainView import BlockChainView
 from pycoinnet.MappingQueue import MappingQueue
 
 
-def create_peer_to_header_q(index_hash_work_tuples, inv_batcher, output_q=None, timeout=10.0, loop=None):
+def create_peer_to_header_q(peer_manager, index_hash_work_tuples, inv_batcher, timeout=10.0, loop=None):
     # create and return a Mapping Queue that takes peers as input
     # and produces tuples of (initial_block, [headers]) as output
 
     blockchain_view = BlockChainView(index_hash_work_tuples)
 
-    peer_q = output_q or asyncio.Queue()
+    peer_q = peer_manager.new_peer_pipeline()
 
     async def peer_to_header_tuples(peer, q):
         block_locator_hashes = blockchain_view.block_locator_hashes()
@@ -57,7 +57,7 @@ def create_peer_to_header_q(index_hash_work_tuples, inv_batcher, output_q=None, 
         await peer_q.put(peer)
 
     return MappingQueue(
-        dict(callback_f=peer_to_header_tuples, input_q=peer_q, worker_count=1),
+        dict(callback_f=peer_to_header_tuples, input_q=peer_manager.new_peer_pipeline(), worker_count=1),
         final_q=asyncio.Queue(maxsize=2), loop=loop)
 
 
@@ -96,12 +96,12 @@ def headers_until_timestamp(inv_batcher, index_hash_work_tuples, peer_manager, t
 
     loop = asyncio.get_event_loop()
 
-    peer_to_header_q = create_peer_to_header_q(index_hash_work_tuples, inv_batcher)
-    peer_manager.new_peer_pipeline(peer_to_header_q)
+    peer_to_header_q = create_peer_to_header_q(peer_manager, index_hash_work_tuples, inv_batcher)
 
     first_block = None
     headers = []
-    while True:
+    all_headers_prior = True
+    while all_headers_prior:
         r = loop.run_until_complete(peer_to_header_q.get())
         if r is None:
             break
@@ -109,13 +109,11 @@ def headers_until_timestamp(inv_batcher, index_hash_work_tuples, peer_manager, t
         if first_block is None:
             first_block = initial_block
         for h in more_headers:
-            if h.timestamp < timestamp:
-                headers.append(h)
-            else:
+            if h.timestamp >= timestamp:
+                all_headers_prior = False
                 break
-        else:
-            continue
-        break
+            headers.append(h)
+    peer_to_header_q.cancel()
     return headers
 
 
@@ -124,8 +122,7 @@ def create_fetch_blocks_after_q(
 
     # return a Queue that gets filled with blocks until we run out
 
-    peer_to_header_q = create_peer_to_header_q(index_hash_work_tuples, inv_batcher)
-    peer_manager.new_peer_pipeline(peer_to_header_q)
+    peer_to_header_q = create_peer_to_header_q(peer_manager, index_hash_work_tuples, inv_batcher)
 
     header_to_block_future_q = create_header_to_block_future_q(
         inv_batcher, input_q=peer_to_header_q, filter_f=filter_f)
