@@ -7,11 +7,7 @@ from pycoinnet.MappingQueue import MappingQueue
 from pycoinnet.inv_batcher import InvBatcher
 
 
-def create_peer_to_header_q(peer_manager, blockchain_view, inv_batcher, timeout=10.0, loop=None):
-    # create and return a Mapping Queue that takes peers as input
-    # and produces tuples of (initial_block, [headers]) as output
-
-    peer_q = peer_manager.new_peer_pipeline()
+def make_peer_to_header_tuples(peer_q, inv_batcher, blockchain_view, timeout):
 
     async def peer_to_header_tuples(peer, q):
         block_locator_hashes = blockchain_view.block_locator_hashes()
@@ -53,20 +49,10 @@ def create_peer_to_header_q(peer_manager, blockchain_view, inv_batcher, timeout=
             hashes.append(headers[idx])
         await q.put((block_number, hashes))
         await peer_q.put(peer)
-
-    return MappingQueue(
-        dict(callback_f=peer_to_header_tuples, input_q=peer_q, worker_count=1),
-        final_q=asyncio.Queue(maxsize=2), loop=loop)
+    return peer_to_header_tuples
 
 
-def create_header_to_block_future_q(inv_batcher, input_q=None, filter_f=None, loop=None):
-
-    input_q = input_q or asyncio.Queue()
-    filter_f = filter_f or (lambda block_hash, index: ITEM_TYPE_BLOCK)
-
-    # accepts (initial_block_index, [headers]) tuples as input
-    # produces (block_future, index) tuples as output
-
+def make_create_block_hash_entry(inv_batcher, filter_f):
     async def create_block_hash_entry(item, q):
         if item is None:
             await q.put(None)
@@ -84,46 +70,43 @@ def create_header_to_block_future_q(inv_batcher, input_q=None, filter_f=None, lo
                 f = asyncio.Future()
                 f.set_result(bh)
             await q.put((f, block_index))
+    return create_block_hash_entry
 
-    return MappingQueue(
-        dict(callback_f=create_block_hash_entry, input_q=input_q, worker_count=1),
-        final_q=asyncio.Queue(maxsize=500), loop=loop)
+
+async def header_to_block(next_item, q):
+    if next_item is None:
+        await q.put(None)
+        return
+    block_future, index = next_item
+    block = await block_future
+    if hasattr(block, "tx_futures"):
+        txs = []
+        for f in block.tx_futures:
+            txs.append(await f)
+        block.txs = txs
+    await q.put((block, index))
 
 
 def create_fetch_blocks_after_q(
-        peer_manager, blockchain_view, filter_f=None):
+        peer_manager, blockchain_view, filter_f=None, timeout=10.0, loop=None):
+    # return a Queue that gets filled with blocks until we run out
 
     inv_batcher = InvBatcher(peer_manager)
 
-    # return a Queue that gets filled with blocks until we run out
+    peer_q = peer_manager.new_peer_pipeline()
+    peer_to_header_tuples = make_peer_to_header_tuples(peer_q, inv_batcher, blockchain_view, timeout)
 
-    peer_to_header_q = create_peer_to_header_q(peer_manager, blockchain_view, inv_batcher)
+    filter_f = filter_f or (lambda block_hash, index: ITEM_TYPE_BLOCK)
 
-    header_to_block_future_q = create_header_to_block_future_q(
-        inv_batcher, input_q=peer_to_header_q, filter_f=filter_f)
+    create_block_hash_entry = make_create_block_hash_entry(inv_batcher, filter_f)
 
-    async def header_to_block(next_item, q):
-        if next_item is None:
-            await q.put(None)
-            peer_to_header_q.stop()
-            header_to_block_future_q.stop()
-            await peer_to_header_q.wait()
-            await header_to_block_future_q.drain()
-            return
-        block_future, index = next_item
-        block = await block_future
-        if hasattr(block, "tx_futures"):
-            txs = []
-            for f in block.tx_futures:
-                txs.append(await f)
-            block.txs = txs
-        await q.put((block, index))
-
-    block_index_q = MappingQueue(
-        dict(callback_f=header_to_block, input_q=header_to_block_future_q, worker_count=1)
+    peer_to_blocks = MappingQueue(
+        dict(callback_f=peer_to_header_tuples, input_q=peer_q, worker_count=1),
+        dict(callback_f=create_block_hash_entry, worker_count=1, input_q_maxsize=2),
+        dict(callback_f=header_to_block, worker_count=1)
     )
 
-    return block_index_q
+    return peer_to_blocks
 
 
 def fetch_blocks_after(peer_manager, blockchain_view, filter_f=None):
