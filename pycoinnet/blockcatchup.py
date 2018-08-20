@@ -3,15 +3,13 @@ import logging
 
 from pycoin.message.InvItem import InvItem, ITEM_TYPE_BLOCK
 
-from pycoinnet.BlockChainView import BlockChainView
 from pycoinnet.MappingQueue import MappingQueue
+from pycoinnet.inv_batcher import InvBatcher
 
 
-def create_peer_to_header_q(peer_manager, index_hash_work_tuples, inv_batcher, timeout=10.0, loop=None):
+def create_peer_to_header_q(peer_manager, blockchain_view, inv_batcher, timeout=10.0, loop=None):
     # create and return a Mapping Queue that takes peers as input
     # and produces tuples of (initial_block, [headers]) as output
-
-    blockchain_view = BlockChainView(index_hash_work_tuples)
 
     peer_q = peer_manager.new_peer_pipeline()
 
@@ -30,6 +28,12 @@ def create_peer_to_header_q(peer_manager, index_hash_work_tuples, inv_batcher, t
                 data = await done.pop()
                 headers = [bh for bh, t in data["headers"]]
 
+        if len(headers) == 0:
+            if peer_q.qsize() == 0:
+                await q.put(None)
+                # this peer has exhausted its view
+            return
+
         while len(headers) > 0 and headers[0].previous_block_hash != blockchain_view.last_block_tuple()[1]:
             # this hack is necessary because the stupid default client
             # does not send the genesis block!
@@ -39,12 +43,6 @@ def create_peer_to_header_q(peer_manager, index_hash_work_tuples, inv_batcher, t
             headers = [block] + headers
 
         block_number = blockchain_view.do_headers_improve_path(headers)
-        if block_number is False:
-            if peer_q.qsize() == 0:
-                await q.put(None)
-            # this peer has exhausted its view
-            return
-
         logging.debug("block header count is now %d", block_number)
         hashes = []
 
@@ -57,7 +55,7 @@ def create_peer_to_header_q(peer_manager, index_hash_work_tuples, inv_batcher, t
         await peer_q.put(peer)
 
     return MappingQueue(
-        dict(callback_f=peer_to_header_tuples, input_q=peer_manager.new_peer_pipeline(), worker_count=1),
+        dict(callback_f=peer_to_header_tuples, input_q=peer_q, worker_count=1),
         final_q=asyncio.Queue(maxsize=2), loop=loop)
 
 
@@ -92,37 +90,14 @@ def create_header_to_block_future_q(inv_batcher, input_q=None, filter_f=None, lo
         final_q=asyncio.Queue(maxsize=500), loop=loop)
 
 
-def headers_until_timestamp(inv_batcher, index_hash_work_tuples, peer_manager, timestamp):
-
-    loop = asyncio.get_event_loop()
-
-    peer_to_header_q = create_peer_to_header_q(peer_manager, index_hash_work_tuples, inv_batcher)
-
-    first_block = None
-    headers = []
-    all_headers_prior = True
-    while all_headers_prior:
-        r = loop.run_until_complete(peer_to_header_q.get())
-        if r is None:
-            break
-        initial_block, more_headers = r
-        if first_block is None:
-            first_block = initial_block
-        for h in more_headers:
-            if h.timestamp >= timestamp:
-                all_headers_prior = False
-                break
-            headers.append(h)
-    peer_to_header_q.cancel()
-    return headers
-
-
 def create_fetch_blocks_after_q(
-        inv_batcher, index_hash_work_tuples, peer_manager, header_skip_timestamp=None, filter_f=None):
+        peer_manager, blockchain_view, filter_f=None):
+
+    inv_batcher = InvBatcher(peer_manager)
 
     # return a Queue that gets filled with blocks until we run out
 
-    peer_to_header_q = create_peer_to_header_q(peer_manager, index_hash_work_tuples, inv_batcher)
+    peer_to_header_q = create_peer_to_header_q(peer_manager, blockchain_view, inv_batcher)
 
     header_to_block_future_q = create_header_to_block_future_q(
         inv_batcher, input_q=peer_to_header_q, filter_f=filter_f)
@@ -151,14 +126,12 @@ def create_fetch_blocks_after_q(
     return block_index_q
 
 
-def fetch_blocks_after(
-        inv_batcher, index_hash_work_tuples, peer_manager, header_skip_timestamp=None, filter_f=None):
+def fetch_blocks_after(peer_manager, blockchain_view, filter_f=None):
 
     # yields blocks until we run out
     loop = asyncio.get_event_loop()
 
-    block_index_q = create_fetch_blocks_after_q(
-        inv_batcher, index_hash_work_tuples, peer_manager, filter_f)
+    block_index_q = create_fetch_blocks_after_q(peer_manager, blockchain_view, filter_f)
 
     while True:
         v = loop.run_until_complete(block_index_q.get())

@@ -26,9 +26,9 @@ from pycoin.message.InvItem import ITEM_TYPE_BLOCK, ITEM_TYPE_MERKLEBLOCK
 from pycoin.coins.tx_utils import create_tx
 
 from pycoinnet.BlockChainView import BlockChainView
-from pycoinnet.inv_batcher import InvBatcher
+from pycoinnet.pong_manager import install_pong_manager
 
-from pycoinnet.blockcatchup import fetch_blocks_after, headers_until_timestamp
+from pycoinnet.blockcatchup import fetch_blocks_after
 from pycoinnet.peer_pipeline import get_peer_pipeline
 from pycoinnet.PeerManager import PeerManager
 
@@ -344,8 +344,10 @@ class Wallet:
 
     def rewind(self, block_index):
         self.set_last_block_index(block_index-1)
+        self._global_db.commit()
         self._spendable_db.rewind_spendables(block_index)
         self._spendable_db.commit()
+        self.set_blockchain_view(self.blockchain_view().rewind(block_index))
 
     def process_confirmed_spendables(self, new_spendables_and_blobs, block_index):
         for spendable, blobs in new_spendables_and_blobs:
@@ -373,7 +375,6 @@ class Wallet:
         return new_spendables_and_blobs, spent_spendables
 
     def process_block(self, block, block_index, txs, blockchain_view):
-        self.set_last_block_index(block_index)
         new_spendables_and_blobs, spent_spendables = self.filter_interesting_txs(txs)
         self.process_confirmed_spendables(new_spendables_and_blobs, block_index)
         self.process_spent_spendables(spent_spendables, block_index)
@@ -438,10 +439,13 @@ def wallet_for_args(args):
     return Wallet(interest_finder, global_db, spendable_db)
 
 
-def commit_to_persistence(wallet, blockchain_view, last_block=None):
-    if last_block:
-        blockchain_view.winnow(last_block)
+def commit_to_persistence(wallet, blockchain_view, last_block_index, when=None):
+    blockchain_view.winnow(last_block_index)
+    wallet.set_last_block_index(last_block_index)
     wallet.set_blockchain_view(blockchain_view)
+    if when:
+        logging.info("checkpoint commit at block %06d (%s)" % (
+            last_block_index, datetime.datetime.fromtimestamp(when)))
 
 
 def wallet_fetch(args):
@@ -469,8 +473,6 @@ def wallet_fetch(args):
         def got_addr(peer, name, data):
             pass
 
-        from pycoinnet.pong_manager import install_pong_manager
-
         install_pong_manager(peer)
         peer.set_request_callback("alert", lambda *args: None)
         peer.set_request_callback("addr", got_addr)
@@ -486,21 +488,13 @@ def wallet_fetch(args):
     peer_pipeline = get_peer_pipeline(args.network, args.peer)
     peer_manager = PeerManager(peer_pipeline, args.count, got_new_peer)
 
-    index_hash_work_tuples = blockchain_view.node_tuples
-
-    inv_batcher = InvBatcher(peer_manager)
-
-    # explicitly skip ahead past early_timestamp
-    headers = headers_until_timestamp(inv_batcher, index_hash_work_tuples, peer_manager, early_timestamp)
-    blockchain_view.do_headers_improve_path(headers)
-
     def filter_f(bh, pri):
         if bh.timestamp >= early_timestamp:
             return ITEM_TYPE_MERKLEBLOCK if args.spv else ITEM_TYPE_BLOCK
 
     last_save_time = time.time()
     for block, last_block_index in fetch_blocks_after(
-            inv_batcher, index_hash_work_tuples, peer_manager=peer_manager, filter_f=filter_f):
+            peer_manager, wallet.blockchain_view(), filter_f=filter_f):
         logging.debug("last_block_index = %s (%s)", last_block_index,
                       datetime.datetime.fromtimestamp(block.timestamp))
         txs = block.txs
@@ -513,10 +507,7 @@ def wallet_fetch(args):
 
         now = time.time()
         if now > last_save_time + 15:
-            logging.info("checkpoint commit at block %06d (%s)" % (
-                last_block_index, datetime.datetime.fromtimestamp(block.timestamp)))
-            commit_to_persistence(wallet, blockchain_view, last_block_index)
-            wallet.set_last_block_index(last_block_index)
+            commit_to_persistence(wallet, blockchain_view, last_block_index, block.timestamp)
             last_save_time = time.time()
     commit_to_persistence(wallet, blockchain_view, last_block_index)
 

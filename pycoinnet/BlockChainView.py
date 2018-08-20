@@ -131,6 +131,7 @@ class BlockChainView:
 
     def rewind(self, new_block_index):
         self._set_tuples(nt for nt in self.node_tuples if nt[0] <= new_block_index)
+        return self
 
     def do_headers_improve_path(self, headers):
         """
