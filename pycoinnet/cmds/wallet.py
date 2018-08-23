@@ -112,7 +112,8 @@ class SpendableDB(DB):
         # we alternate between "biggest" and "smallest" spendables
         SQL = ("select tx_hash, tx_out_index, coin_value, script, block_index_available, "
                "does_seem_spent, block_index_spent from Spendable where "
-               "block_index_available > 0 and does_seem_spent = 0 and block_index_spent = 0 "
+               "block_index_available > 0 and does_seem_spent = 0 and "
+               "(block_index_spent = 0 or block_index_spent > ?) "
                "%s order by coin_value %s")
 
         if confirmations > 0:
@@ -121,8 +122,8 @@ class SpendableDB(DB):
         else:
             t1 = ""
 
-        c1 = self._exec_sql(SQL % (t1, "desc"))
-        c2 = self._exec_sql(SQL % (t1, "asc"))
+        c1 = self._exec_sql(SQL % (t1, "desc"), last_block)
+        c2 = self._exec_sql(SQL % (t1, "asc"), last_block)
 
         seen = set()
         try:
@@ -600,9 +601,9 @@ def wallet_rewind(args):
 
 def wallet_dump(args):
     wallet = wallet_for_args(args)
-    lbi = wallet.last_block_index()
+    last_block = args.block_number or wallet.last_block_index()
 
-    for spendable in wallet.unspent_spendables(lbi, args.network.tx.Spendable, confirmations=1):
+    for spendable in wallet.unspent_spendables(last_block, args.network.tx.Spendable, confirmations=1):
         if spendable.block_index_available != 0:
             print(spendable.as_text())
 
@@ -697,7 +698,9 @@ def create_parser():
     rewind_parser = subparsers.add_parser('rewind', help="Rewind to a given block")
     rewind_parser.add_argument('block_number', type=int, help="block number to rewind to")
 
-    subparsers.add_parser('dump', help="Dump spendables")
+    dump_parser = subparsers.add_parser('dump', help="Dump spendables")
+    dump_parser.add_argument('block_number', type=int, help="block number to rewind to", default=None)
+
     subparsers.add_parser('history', help="Show history")
 
     address_parser = subparsers.add_parser('address', help="Dump addresses")
