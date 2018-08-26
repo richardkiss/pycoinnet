@@ -39,7 +39,7 @@ def make_peer_to_header_tuples(peer_q, inv_batcher, blockchain_view, timeout):
                 headers = [block] + headers
 
             block_number = blockchain_view.do_headers_improve_path(headers)
-            if not block_number:
+            if block_number is False:
                 await peer_q.put(peer)
                 break
 
@@ -111,7 +111,7 @@ def create_fetch_blocks_after_q(
     peer_to_blocks = MappingQueue(
         dict(callback_f=peer_to_header_tuples, input_q=peer_q, worker_count=2),
         dict(callback_f=create_block_hash_entry, worker_count=1, input_q_maxsize=2),
-        dict(callback_f=header_to_block, worker_count=1)
+        dict(callback_f=header_to_block, worker_count=1, input_q_maxsize=100)
     )
 
     return peer_to_blocks

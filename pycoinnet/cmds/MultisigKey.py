@@ -60,7 +60,7 @@ def parse_MultisigKey(text):
         items = text.split(":")
         network = network_for_netcode(items[0])
         m = int(items[2])
-        bip32_list = [network.ui.parse(_, types=["bip32"]) for _ in items[3].split("/")]
+        bip32_list = [network.ui.parse(_.replace("\\", ":"), types=["bip32", "electrum"]) for _ in items[3].split("/")]
         path = ""
         if len(items) > 4:
             path = items[5]

@@ -199,7 +199,7 @@ class InterestFinder:
 
     def interesting_blobs_from_script(self, script):
         interesting = []
-        for opcode, data, pc, new_pc in self._network.extras.ScriptTools.get_opcodes(script):
+        for opcode, data, pc, new_pc in self._network.script_tools.get_opcodes(script):
             if data and self.blob_is_interesting(script, data):
                 interesting.append(data)
         return interesting
@@ -244,7 +244,7 @@ class InterestFinder:
 
         script = self._keychain.p2s_for_hash(blob)
         if script:
-            for opcode, data, pc, new_pc in self._network.extras.ScriptTools.get_opcodes(script):
+            for opcode, data, pc, new_pc in self._network.script_tools.get_opcodes(script):
                 # OMG this is disgusting
                 h160 = hash160(data)
                 r = self._keychain.path_for_hash160(h160)
@@ -345,10 +345,10 @@ class Wallet:
 
     def rewind(self, block_index):
         self.set_last_block_index(block_index-1)
+        self.set_blockchain_view(self.blockchain_view().rewind(block_index))
         self._global_db.commit()
         self._spendable_db.rewind_spendables(block_index)
         self._spendable_db.commit()
-        self.set_blockchain_view(self.blockchain_view().rewind(block_index))
 
     def process_confirmed_spendables(self, new_spendables_and_blobs, block_index):
         for spendable, blobs in new_spendables_and_blobs:
@@ -412,7 +412,7 @@ def bloom_filter_for_addresses_spendables(
 
 
 def wallet_for_args(args):
-    basepath = os.path.join(os.path.expanduser(args.path), args.wallet_name, args.network.code)
+    basepath = os.path.join(os.path.expanduser(args.path), args.wallet_name, args.network.symbol)
     if not os.path.exists(basepath):
         os.makedirs(basepath)
 
@@ -424,7 +424,7 @@ def wallet_for_args(args):
     except OSError:
         hash160_list = []
 
-    lines = open(os.path.join(basepath, "multisig_key")).readlines()
+    lines = open(os.path.join(basepath, "multisig_key")).read().split("\n")
 
     multisig_key = None
     try:
@@ -528,7 +528,7 @@ def as_payable(payable, network):
     if "/" in payable:
         address, amount = payable.split("/", 1)
         amount = int(amount)
-    if not is_address_valid(address, allowable_netcodes=[network.code]):
+    if not is_address_valid(address, allowable_netcodes=[network.symbol]):
         raise argparse.ArgumentTypeError("%s is not a valid address" % address)
     if amount:
         return (address, amount)
@@ -689,8 +689,8 @@ def create_parser():
     create_parser.add_argument(
         "-o", "--output", metavar="OUTPUT_FILENAME", type=str, help="name of tx output file", required=True)
     create_parser.add_argument("-F", "--fee", type=int, help="fee in satoshis", default=1000)
-    create_parser.add_argument('payable', nargs='+',
-                               help="payable: either a bitcoin address, or an address/amount combo")
+    create_parser.add_argument(
+        'payable', nargs='+', help="payable: either a bitcoin address, or an address/amount combo")
 
     exclude_parser = subparsers.add_parser('exclude', help="Exclude spendables from a given transaction")
     exclude_parser.add_argument('path_to_tx', help="path to transaction")
@@ -699,7 +699,8 @@ def create_parser():
     rewind_parser.add_argument('block_number', type=int, help="block number to rewind to")
 
     dump_parser = subparsers.add_parser('dump', help="Dump spendables")
-    dump_parser.add_argument('block_number', type=int, help="block number to rewind to", default=None)
+    dump_parser.add_argument(
+        'block_number', type=int, help="block number to rewind to", nargs="?", default=None)
 
     subparsers.add_parser('history', help="Show history")
 

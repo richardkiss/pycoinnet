@@ -5,17 +5,16 @@ from pycoin.encoding.hexbytes import h2b_rev
 from pycoin.message.InvItem import InvItem, ITEM_TYPE_BLOCK
 from pycoin.networks.registry import network_codes, network_for_netcode
 
-from pycoinnet.blockcatchup import create_peer_to_header_q
 from pycoinnet.dnsbootstrap import dns_bootstrap_host_port_q
 from pycoinnet.cmds.common import init_logging
 from pycoinnet.inv_batcher import InvBatcher
-from pycoinnet.peer_pipeline import create_hostport_to_peers_q
+from pycoinnet.PeerManager import PeerManager
+from pycoinnet.peer_pipeline import peer_connect_pipeline
 from pycoinnet.pong_manager import install_pong_manager
 from pycoinnet.version import NODE_NETWORK
 
 
 async def set_up_inv_batcher(network, max_peer_count=8):
-    inv_batcher = InvBatcher()
 
     # add some peers to InvBatcher
     async def peer_callback(peer):
@@ -27,9 +26,10 @@ async def set_up_inv_batcher(network, max_peer_count=8):
         await inv_batcher.add_peer(peer)
         peer.start()
 
-    hostport_to_peers_q = create_hostport_to_peers_q(
-        network, peer_count=max_peer_count, connect_callback=peer_callback)
-    inv_batcher.q = dns_bootstrap_host_port_q(network, output_q=hostport_to_peers_q)
+    peer_pipeline = peer_connect_pipeline(network, version_dict=dict(version=70016))
+    peer_manager = PeerManager(peer_pipeline, 8, peer_callback)
+
+    inv_batcher = InvBatcher(peer_manager)
     return inv_batcher
 
 
