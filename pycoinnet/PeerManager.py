@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import weakref
 
 
 class PeerManager:
@@ -10,7 +9,8 @@ class PeerManager:
         self._desired_peer_count = desired_peer_count
         self._new_peer_async_callback = new_peer_async_callback
         self._peers = set()
-        self._pipelines = weakref.WeakSet()
+        self._event_callback_index = 0
+        self._event_callbacks = {}  # BRAIN DAMAGE: weakref.WeakValueDictionary()
         self._is_running = True
         self._outgoing_coroutines = [self._maintain_outgoing() for _ in range(desired_peer_count)]
         self._incoming_peers = asyncio.Queue()
@@ -34,10 +34,10 @@ class PeerManager:
         await self._new_peer_async_callback(peer)
         self._peers.add(peer)
         # tell children
-        for pipeline in list(self._pipelines):
-            if not pipeline.full():
-                pipeline.put_nowait(peer)
-        await peer.wait_until_close()
+        for callback in list(self._event_callbacks.values()):
+            asyncio.get_event_loop().call_soon(callback, peer, None, None)
+        await self.process_events(peer)
+        peer.close()
         logging.debug("peer closed %s", peer)
         self._peers.remove(peer)
 
@@ -55,10 +55,18 @@ class PeerManager:
             # we can interrupt here, and that's not good
             self._peer_lifecycle(peer)
 
-    def new_peer_pipeline(self, pipeline=None):
-        if pipeline is None:
-            pipeline = asyncio.Queue()
-        self._pipelines.add(pipeline)
+    def add_event_callback(self, callback):
+        self._event_callback_index += 1
+        self._event_callbacks[self._event_callback_index] = callback
         for peer in list(self._peers):
-            pipeline.put_nowait(peer)
-        return pipeline
+            asyncio.get_event_loop().call_soon(callback, peer, None, None)
+        return self._event_callback_index
+
+    async def process_events(self, peer):
+        while True:
+            event = await peer.next_message()
+            if event is None:
+                break
+            name, data = event
+            for callback in list(self._event_callbacks.values()):
+                asyncio.get_event_loop().call_soon(callback, peer, name, data)

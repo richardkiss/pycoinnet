@@ -23,9 +23,6 @@ class Peer:
         self._max_msg_size = max_msg_size
         self._msg_lock = asyncio.Lock()
         # events
-        self._request_callbacks = dict()
-        self._response_futures = dict()
-        self._task = None
         self._is_closed = asyncio.Future()
         # stats
         self._bytes_read = 0
@@ -99,60 +96,6 @@ class Peer:
 
     def peername(self):
         return self._reader._transport.get_extra_info("peername") or self._reader._transport
-
-    # events
-    async def perform_handshake(self, **version_msg):
-        """
-        Call this method to kick of event processing.
-        """
-        # "version"
-        self.send_msg("version", **version_msg)
-        event = await self.next_message()
-        if event is None:
-            return None
-        msg, version_data = event
-        if msg != 'version':
-            return None
-
-        # "verack"
-        self.send_msg("verack")
-        event = await self.next_message()
-        if event is None:
-            return None
-        msg, verack_data = event
-        if msg != 'verack':
-            return None
-
-        return version_data
-
-    def start(self):
-        if self._task is None:
-            self._task = asyncio.ensure_future(self.process_events())
-
-    async def request_response(self, request_message, response_message, **kwargs):
-        if response_message in self._request_callbacks:
-            await self._request_callbacks[response_message]
-        self._response_futures[response_message] = asyncio.Future()
-        self.send_msg(request_message, **kwargs)
-        return await self._response_futures[response_message]
-
-    def set_request_callback(self, name, callback_f):
-        self._request_callbacks[name] = callback_f
-
-    async def process_events(self):
-        while True:
-            event = await self.next_message()
-            if event is None:
-                break
-            name, data = event
-            if name in self._request_callbacks:
-                self._request_callbacks[name](self, name, data)
-            elif name in self._response_futures:
-                self._response_futures[name].set_result(data)
-                del self._response_futures[name]
-            else:
-                logging.error("unhandled event %s %s", event[0], event[1])
-        self.close()
 
     async def wait_until_close(self):
         await self._is_closed

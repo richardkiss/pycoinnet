@@ -1,4 +1,7 @@
-def install_pong_manager(peer):
-    def pong_callback(peer, name, data):
+def install_pong_manager(peer_manager):
+    peer_manager.add_event_callback(pong_callback)
+
+
+def pong_callback(peer, name, data):
+    if name == "ping":
         peer.send_msg("pong", nonce=data["nonce"])
-    peer.set_request_callback("ping", pong_callback)

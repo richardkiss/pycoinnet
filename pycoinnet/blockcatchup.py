@@ -7,7 +7,24 @@ from pycoinnet.MappingQueue import MappingQueue
 from pycoinnet.inv_batcher import InvBatcher
 
 
-def make_peer_to_header_tuples(peer_q, inv_batcher, blockchain_view, timeout):
+class RequestResponder:
+    def __init__(self, peer_manager):
+        self._callback_handle = peer_manager.add_event_callback(self.event_callback)
+        self._response_futures = dict()
+
+    def event_callback(self, peer, message, data):
+        if (peer, message) in self._response_futures:
+            self._response_futures[(peer, message)].set_result(data)
+
+    def request_response(self, peer, request_message, response_message, **kwargs):
+        self._response_futures[(peer, response_message)] = asyncio.Future()
+        peer.send_msg(request_message, **kwargs)
+        return self._response_futures[(peer, response_message)]
+
+
+def make_peer_to_header_tuples(peer_manager, peer_q, inv_batcher, blockchain_view, timeout):
+
+    rr = RequestResponder(peer_manager)
 
     async def peer_to_header_tuples(peer, q):
         while True:
@@ -17,8 +34,8 @@ def make_peer_to_header_tuples(peer_q, inv_batcher, blockchain_view, timeout):
 
             headers = []
             if not peer.is_closing():
-                request = peer.request_response(
-                    "getheaders", "headers", version=1,
+                request = rr.request_response(
+                    peer, "getheaders", "headers", version=1,
                     hashes=block_locator_hashes, hash_stop=hash_stop)
                 done, pending = await asyncio.wait([request], timeout=timeout)
                 if done:
@@ -30,7 +47,8 @@ def make_peer_to_header_tuples(peer_q, inv_batcher, blockchain_view, timeout):
                 # don't add it back to the queue
                 break
 
-            while len(headers) > 0 and headers[0].previous_block_hash != blockchain_view.last_block_tuple()[1]:
+            while (len(headers) > 0 and
+                    headers[0].previous_block_hash != blockchain_view.last_block_tuple()[1]):
                 # this hack is necessary because the stupid default client
                 # does not send the genesis block!
                 bh = headers[0].previous_block_hash
@@ -101,8 +119,9 @@ def create_fetch_blocks_after_q(
 
     inv_batcher = InvBatcher(peer_manager)
 
-    peer_q = peer_manager.new_peer_pipeline()
-    peer_to_header_tuples = make_peer_to_header_tuples(peer_q, inv_batcher, blockchain_view, timeout)
+    peer_q = asyncio.Queue()
+    peer_to_header_tuples = make_peer_to_header_tuples(
+        peer_manager, peer_q, inv_batcher, blockchain_view, timeout)
 
     filter_f = filter_f or (lambda block_hash, index: ITEM_TYPE_BLOCK)
 
@@ -113,6 +132,13 @@ def create_fetch_blocks_after_q(
         dict(callback_f=create_block_hash_entry, worker_count=1, input_q_maxsize=2),
         dict(callback_f=header_to_block, worker_count=1, input_q_maxsize=100)
     )
+
+    def event_callback(peer, message, data):
+        if message is None:
+            peer_to_blocks.put_nowait(peer)
+
+    peer_to_blocks.callback_handle = peer_manager.add_event_callback(event_callback)
+    peer_to_blocks.event_callback = event_callback
 
     return peer_to_blocks
 

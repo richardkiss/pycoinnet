@@ -80,12 +80,21 @@ class InvBatcher:
 
         self._inv_item_hash_to_future = weakref.WeakValueDictionary()
 
-        async def got_new_peer(peer, q):
-            await self.add_peer(peer)
+        peer_manager.add_event_callback(self.handle_event)
 
-        self._new_peer_q = MappingQueue(
-            dict(callback_f=got_new_peer, input_q=peer_manager.new_peer_pipeline(), worker_count=1)
-        )
+    def handle_event(self, peer, message, data):
+        if message is None:
+            initial_batch_size = 1
+            self._peer_batch_queue.put_nowait((peer, initial_batch_size))
+            self._peer_batch_queue.put_nowait((peer, initial_batch_size))
+            return
+        f = {
+                "block": self.handle_block_event,
+                "merkleblock": self.handle_merkle_block_event,
+                "tx": self.handle_tx_event,
+        }.get(message)
+        if f:
+            f(peer, message, data)
 
     async def inv_item_to_future(self, inv_item, priority=0):
         f = self._inv_item_hash_to_future.get(inv_item)
@@ -94,16 +103,6 @@ class InvBatcher:
             item = (priority, inv_item, f, set())
             await self._inv_item_future_queue.put(item)
         return f
-
-    async def add_peer(self, peer, initial_batch_size=1):
-        self.register_peer_callbacks(peer)
-        await self._peer_batch_queue.put((peer, initial_batch_size))
-        await self._peer_batch_queue.put((peer, initial_batch_size))
-
-    def register_peer_callbacks(self, peer):
-        peer.set_request_callback("block", self.handle_block_event)
-        peer.set_request_callback("merkleblock", self.handle_merkle_block_event)
-        peer.set_request_callback("tx", self.handle_tx_event)
 
     def stop(self):
         self._peer_batch_queue.stop()

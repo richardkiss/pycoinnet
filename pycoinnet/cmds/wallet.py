@@ -470,24 +470,13 @@ def wallet_fetch(args):
     flags = 1  # BLOOM_UPDATE_ALL = 1  # BRAIN DAMAGE
 
     async def got_new_peer(peer):
-
-        def got_addr(peer, name, data):
-            pass
-
-        install_pong_manager(peer)
-        peer.set_request_callback("alert", lambda *args: None)
-        peer.set_request_callback("addr", got_addr)
-        peer.set_request_callback("inv", lambda *args: None)
-        peer.set_request_callback("feefilter", lambda *args: None)
-        peer.set_request_callback("sendheaders", lambda *args: None)
-        peer.set_request_callback("sendcmpct", lambda *args: None)
         if args.spv:
             peer.send_msg("filterload", filter=filter_bytes, tweak=tweak,
                           hash_function_count=hash_function_count, flags=flags)
-        peer.start()
 
     peer_pipeline = get_peer_pipeline(args.network, args.peer)
     peer_manager = PeerManager(peer_pipeline, args.count, got_new_peer)
+    install_pong_manager(peer_manager)
 
     def filter_f(bh, pri):
         if bh.timestamp >= early_timestamp:
