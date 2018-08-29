@@ -17,6 +17,9 @@ class PeerManager:
         self._maintain_task = asyncio.gather(
             asyncio.gather(*self._outgoing_coroutines), self._maintain_incoming())
 
+    def peers(self):
+        return list(self._peers)
+
     def accept_incoming_peer(self, peer):
         # TODO: handle incoming
         # self._incoming_peers.put_nowait(peer)
@@ -61,6 +64,10 @@ class PeerManager:
         for peer in list(self._peers):
             asyncio.get_event_loop().call_soon(callback, peer, None, None)
         return self._event_callback_index
+
+    def del_event_callback(self, handle):
+        if handle in self._event_callbacks:
+            del self._event_callbacks[handle]
 
     async def process_events(self, peer):
         while True:
