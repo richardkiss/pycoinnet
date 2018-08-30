@@ -3,7 +3,7 @@ import logging
 import weakref
 
 from pycoin.message.InvItem import InvItem, ITEM_TYPE_TX, ITEM_TYPE_BLOCK, ITEM_TYPE_MERKLEBLOCK
-from pycoinnet.MappingQueue import MappingQueue
+from pycoinnet.async_iterators import stoppable_q, map_aiter, parallel_map_aiter, flatten_aiter
 
 
 class InvBatcher:
@@ -13,7 +13,7 @@ class InvBatcher:
         self._is_closing = False
         self._inv_item_future_queue = asyncio.PriorityQueue(maxsize=inv_item_future_q_maxsize)
 
-        async def batch_getdata_fetches(peer_batch_tuple, q):
+        async def batch_getdata_fetches(peer_batch_tuple):
             peer, desired_batch_size = peer_batch_tuple
             batch = []
             skipped = []
@@ -29,12 +29,13 @@ class InvBatcher:
                 else:
                     batch.append(item)
             if len(batch) > 0:
-                await q.put((peer, batch, desired_batch_size))
+                return [(peer, batch, desired_batch_size)]
             for item in skipped:
                 if not item[2].done:
                     await self._inv_item_future_queue.put(item)
+            return []
 
-        async def fetch_batch(peer_batch, q):
+        async def fetch_batch(peer_batch):
             loop = asyncio.get_event_loop()
             peer, batch, prior_max = peer_batch
             inv_items = [inv_item for (priority, inv_item, f, peers_tried) in batch]
@@ -73,10 +74,17 @@ class InvBatcher:
             logging.debug("new batch size for %s is %d", peer, new_batch_size)
             await self._peer_batch_queue.put((peer, new_batch_size))
 
-        self._peer_batch_queue = MappingQueue(
-            dict(callback_f=batch_getdata_fetches),
-            dict(callback_f=fetch_batch, input_q_maxsize=2, worker_count=20),
-        )
+        self._peer_batch_queue = stoppable_q()
+
+        peer_batch_info_aiter = flatten_aiter(map_aiter(self._peer_batch_queue, batch_getdata_fetches))
+
+        is_finished_aiter = parallel_map_aiter(peer_batch_info_aiter, fetch_batch, maxsize=2, worker_count=20)
+
+        async def finish(is_finished_aiter):
+            async for _ in is_finished_aiter():
+                pass
+
+        self._task = asyncio.ensure_future(finish(is_finished_aiter))
 
         self._inv_item_hash_to_future = weakref.WeakValueDictionary()
 

@@ -66,6 +66,9 @@ class stoppable_q:
     async def put(self, item):
         await self._q.put(item)
 
+    def put_nowait(self, item):
+        self._q.put_nowait(item)
+
     async def __anext__(self):
         while True:
             if self._is_done.done():
