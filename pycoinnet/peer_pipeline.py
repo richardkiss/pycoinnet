@@ -7,13 +7,8 @@ from pycoinnet.Peer import Peer
 from pycoinnet.version import version_data_for_peer
 
 
-def peer_connect_iterator(network, tcp_connect_workers=30, handshake_workers=3,
-                          host_iterator=None, loop=None, version_dict={}):
-
-    if host_iterator is None:
-        host_iterator = dns_bootstrap_host_port_iterator(network)
-
-    result_q = asyncio.Queue()
+def connected_peer_iterator(network, tcp_connect_workers=30, handshake_workers=3,
+                            host_aiter=None, version_dict={}):
 
     async def host_port_to_reader_writer(host_port_pair):
         host, port = host_port_pair
@@ -38,29 +33,33 @@ def peer_connect_iterator(network, tcp_connect_workers=30, handshake_workers=3,
         else:
             return [peer]
 
-    reader_writer_iterator = flatten_aiter(parallel_map_aiter(
-        host_port_to_reader_writer, tcp_connect_workers, host_iterator))
+    aiter = flatten_aiter(
+        parallel_map_aiter(peer_handshake, handshake_workers, flatten_aiter(
+            parallel_map_aiter(
+                host_port_to_reader_writer, tcp_connect_workers, host_aiter))))
 
-    connected_peer_iterator = flatten_aiter(parallel_map_aiter(
-        peer_handshake, handshake_workers, reader_writer_iterator))
+    return aiter
 
-    return connected_peer_iterator
+
+def peer_address_to_hostport(peer_address, default_port):
+    if "/" in peer_address:
+        host, port = peer_address.split("/", 1)
+        port = int(port)
+        return host, port
+    return peer_address, default_port
+
+
+def peer_addresses_to_host_aiter(network, peer_addresses=[]):
+    hostports = [peer_address_to_hostport(_, network) for _ in peer_addresses]
+    if hostports:
+        return iter_to_aiter(hostports)
+    return dns_bootstrap_host_port_iterator(network)
 
 
 def get_peer_iterator(network, peer_addresses=None):
-    # for now, let's just do one peer
-    host_iterator = None
-    if peer_addresses:
-        for peer in peer_addresses:
-            if "/" in peer:
-                host, port = peer.split("/", 1)
-                port = int(port)
-            else:
-                host = peer
-                port = network.default_port
-            host_iterator = iter_to_aiter([(host, port)])
     # BRAIN DAMAGE: 70016 version number is required for bgold new block header format
-    return peer_connect_iterator(network, host_iterator=host_iterator, version_dict=dict(version=70016))
+    host_aiter = peer_addresses_to_host_aiter(network, peer_addresses)
+    return connected_peer_iterator(network, host_aiter=host_aiter, version_dict=dict(version=70016))
 
 
 # events

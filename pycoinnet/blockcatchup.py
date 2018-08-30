@@ -39,8 +39,10 @@ async def create_header_fetcher(peer_manager, header_q, inv_batcher, blockchain_
     best_peer = None
 
     while True:
-        peers_to_query = [best_peer] if best_peer else []
-        while len(peers_to_query) < 2:
+        peers_to_query, peers_needed = [], caught_up_peer_count
+        if best_peer:
+            peers_to_query, peers_needed = [best_peer], 2
+        while len(peers_to_query) < peers_needed:
             if peer_q.empty():
                 for p in peer_manager.peers():
                     if p and p not in peers_to_query and p not in caught_up_peers and not p.is_closing():

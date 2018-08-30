@@ -13,7 +13,6 @@ class PeerManager:
         self._event_callbacks = {}  # BRAIN DAMAGE: weakref.WeakValueDictionary()
         self._is_running = True
         self._outgoing_coroutines = [self._maintain_outgoing() for _ in range(desired_peer_count)]
-        self._incoming_peers = asyncio.Queue()
         self._maintain_task = asyncio.gather(
             asyncio.gather(*self._outgoing_coroutines), self._maintain_incoming())
 
@@ -22,7 +21,6 @@ class PeerManager:
 
     def accept_incoming_peer(self, peer):
         # TODO: handle incoming
-        # self._incoming_peers.put_nowait(peer)
         pass
 
     def close_all(self):
@@ -55,7 +53,6 @@ class PeerManager:
         return
         # TODO: fix this
         while self._is_running:
-            peer = await self._incoming_peers.get()
             # we can interrupt here, and that's not good
             self._peer_lifecycle(peer)
 
