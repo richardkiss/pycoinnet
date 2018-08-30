@@ -44,7 +44,7 @@ class Peer:
     async def next_message(self, unpack_to_dict=True):
         header_size = len(self._magic_header)
         try:
-            with (await self._msg_lock):
+            async with self._msg_lock:
                 # read magic header
                 reader = self._reader
                 blob = await reader.readexactly(header_size)

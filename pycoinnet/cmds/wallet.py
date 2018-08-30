@@ -29,7 +29,7 @@ from pycoinnet.BlockChainView import BlockChainView
 from pycoinnet.pong_manager import install_pong_manager
 
 from pycoinnet.blockcatchup import fetch_blocks_after
-from pycoinnet.peer_pipeline import get_peer_pipeline
+from pycoinnet.peer_pipeline import get_peer_iterator
 from pycoinnet.PeerManager import PeerManager
 
 from .MultisigKey import parse_MultisigKey
@@ -419,12 +419,13 @@ def wallet_for_args(args):
     sql_path = os.path.join(basepath, "wallet.db")
 
     try:
-        hash160_list = [a2b_hashed_base58(a[:-1])[1:] for a in open(
-            os.path.join(basepath, "watch_addresses")).readlines()]
+        with open(os.path.join(basepath, "watch_addresses")) as f:
+            hash160_list = [a2b_hashed_base58(a[:-1])[1:] for a in f.readlines()]
     except OSError:
         hash160_list = []
 
-    lines = open(os.path.join(basepath, "multisig_key")).read().split("\n")
+    with open(os.path.join(basepath, "multisig_key")) as f:
+        lines = f.read().split("\n")
 
     multisig_key = None
     try:
@@ -474,8 +475,8 @@ def wallet_fetch(args):
             peer.send_msg("filterload", filter=filter_bytes, tweak=tweak,
                           hash_function_count=hash_function_count, flags=flags)
 
-    peer_pipeline = get_peer_pipeline(args.network, args.peer)
-    peer_manager = PeerManager(peer_pipeline, args.count, got_new_peer)
+    peer_iterator = get_peer_iterator(args.network, args.peer)
+    peer_manager = PeerManager(peer_iterator, args.count, got_new_peer)
     install_pong_manager(peer_manager)
 
     def filter_f(bh, pri):

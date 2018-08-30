@@ -4,8 +4,8 @@ import logging
 
 class PeerManager:
     # TODO: handle incoming
-    def __init__(self, peer_pipeline, desired_peer_count, new_peer_async_callback=lambda peer: None):
-        self._peer_pipeline = peer_pipeline
+    def __init__(self, peer_iterator, desired_peer_count, new_peer_async_callback=lambda peer: None):
+        self._peer_iterator = peer_iterator
         self._desired_peer_count = desired_peer_count
         self._new_peer_async_callback = new_peer_async_callback
         self._peers = set()
@@ -45,8 +45,9 @@ class PeerManager:
         self._peers.remove(peer)
 
     async def _maintain_outgoing(self):
-        while self._is_running:
-            peer = await self._peer_pipeline.get()
+        async for peer in self._peer_iterator:
+            if not self._is_running:
+                break
             await self._peer_lifecycle(peer)
             logging.debug("acquiring new peer to replace %s", peer)
 

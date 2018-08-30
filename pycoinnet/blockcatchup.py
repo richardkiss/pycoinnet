@@ -3,7 +3,7 @@ import logging
 
 from pycoin.message.InvItem import InvItem, ITEM_TYPE_BLOCK
 
-from pycoinnet.MappingQueue import MappingQueue
+from pycoinnet.async_iterators import stoppable_q, aiter_to_iter, flatten_aiter, map_aiter, join_aiters
 from pycoinnet.inv_batcher import InvBatcher
 
 
@@ -14,7 +14,8 @@ class RequestResponder:
 
     def event_callback(self, peer, message, data):
         if (peer, message) in self._response_futures:
-            self._response_futures[(peer, message)].set_result((peer, data))
+            if not self._response_futures[(peer, message)].done():
+                self._response_futures[(peer, message)].set_result((peer, data))
 
     def request_response(self, peer, request_message, response_message, **kwargs):
         self._response_futures[(peer, response_message)] = asyncio.Future()
@@ -42,18 +43,18 @@ async def create_header_fetcher(peer_manager, header_q, inv_batcher, blockchain_
         while len(peers_to_query) < 2:
             if peer_q.empty():
                 for p in peer_manager.peers():
-                    if p not in peers_to_query and p not in caught_up_peers and not p.is_closing():
+                    if p and p not in peers_to_query and p not in caught_up_peers and not p.is_closing():
                         peer_q.put_nowait(p)
             if peer_q.empty():
                 # still empty
                 break
             peer = await peer_q.get()
-            if peer not in peers_to_query:
+            if peer not in peers_to_query and peer is not None:
                 peers_to_query.append(peer)
 
         if len(peers_to_query) == 0:
             if len(caught_up_peers) >= 8:
-                return
+                break
             best_peer = await peer_q.get()
             continue
 
@@ -76,6 +77,9 @@ async def create_header_fetcher(peer_manager, header_q, inv_batcher, blockchain_
         if done:
             best_peer, data = await done.pop()
             headers = [bh for bh, t in data["headers"]]
+            for t in pending:
+                t.cancel()
+                await t
 
         while (len(headers) > 0 and
                 headers[0].previous_block_hash != blockchain_view.last_block_tuple()[1]):
@@ -91,7 +95,7 @@ async def create_header_fetcher(peer_manager, header_q, inv_batcher, blockchain_
             # this peer has exhausted its view
             caught_up_peers.add(peer)
             best_peer = None
-            break
+            continue
 
         logging.debug("block header count is now %d", block_number)
         hashes = []
@@ -104,16 +108,26 @@ async def create_header_fetcher(peer_manager, header_q, inv_batcher, blockchain_
 
         await header_q.put((block_number, hashes))
 
+    await header_q.put(None)
 
-def make_create_block_hash_entry(inv_batcher, filter_f):
-    async def create_block_hash_entry(item, q):
-        if item is None:
-            await q.put(None)
-            return
+
+def make_headers_info_aiter(peer_manager, inv_batcher, blockchain_view, timeout):
+    header_q = asyncio.Queue()
+    header_q.task = asyncio.ensure_future(create_header_fetcher(
+        peer_manager, header_q, inv_batcher, blockchain_view, timeout))
+    return stoppable_q(header_q)
+
+
+def make_map_bibh_to_fi(inv_batcher, filter_f):
+    async def map_bibh_to_fi(item):
+        """
+        Map (block_index, block_headers) pairs to a list of (f, block_index) future/int pairs.
+        """
         first_block_index, block_headers = item
         logging.info("got %d new header(s) starting at %d" % (len(block_headers), first_block_index))
         block_hash_priority_pair_list = [(bh, first_block_index + _) for _, bh in enumerate(block_headers)]
 
+        results = []
         for bh, block_index in block_hash_priority_pair_list:
             item_type = filter_f(bh, block_index)
             if item_type:
@@ -122,14 +136,12 @@ def make_create_block_hash_entry(inv_batcher, filter_f):
             else:
                 f = asyncio.Future()
                 f.set_result(bh)
-            await q.put((f, block_index))
-    return create_block_hash_entry
+            results.append((f, block_index))
+        return results
+    return map_bibh_to_fi
 
 
-async def header_to_block(next_item, q):
-    if next_item is None:
-        await q.put(None)
-        return
+async def future_to_block(next_item):
     block_future, index = next_item
     block = await block_future
     if hasattr(block, "tx_futures"):
@@ -137,10 +149,10 @@ async def header_to_block(next_item, q):
         for f in block.tx_futures:
             txs.append(await f)
         block.txs = txs
-    await q.put((block, index))
+    return (block, index)
 
 
-def create_fetch_blocks_after_q(
+def create_fetch_blocks_after_aiter(
         peer_manager, blockchain_view, filter_f=None, timeout=10.0, loop=None):
     # return a Queue that gets filled with blocks until we run out
 
@@ -148,29 +160,16 @@ def create_fetch_blocks_after_q(
 
     filter_f = filter_f or (lambda block_hash, index: ITEM_TYPE_BLOCK)
 
-    create_block_hash_entry = make_create_block_hash_entry(inv_batcher, filter_f)
+    map_bibh_to_fi = make_map_bibh_to_fi(inv_batcher, filter_f)
 
-    header_to_blocks_q = MappingQueue(
-        dict(callback_f=create_block_hash_entry, worker_count=1, input_q_maxsize=2),
-        dict(callback_f=header_to_block, worker_count=1, input_q_maxsize=100)
-    )
+    block_index_aiter = map_aiter(join_aiters(flatten_aiter(
+        map_aiter(join_aiters(
+            make_headers_info_aiter(
+                peer_manager, inv_batcher, blockchain_view, timeout), maxsize=2),
+                    map_bibh_to_fi)), maxsize=100), future_to_block)
 
-    t = asyncio.ensure_future(
-        create_header_fetcher(peer_manager, header_to_blocks_q, inv_batcher, blockchain_view, timeout))
-    header_to_blocks_q.t = t
-
-    return header_to_blocks_q
+    return block_index_aiter
 
 
 def fetch_blocks_after(peer_manager, blockchain_view, filter_f=None):
-
-    # yields blocks until we run out
-    loop = asyncio.get_event_loop()
-
-    block_index_q = create_fetch_blocks_after_q(peer_manager, blockchain_view, filter_f)
-
-    while True:
-        v = loop.run_until_complete(block_index_q.get())
-        if v is None:
-            break
-        yield v
+    return aiter_to_iter(create_fetch_blocks_after_aiter(peer_manager, blockchain_view, filter_f))
