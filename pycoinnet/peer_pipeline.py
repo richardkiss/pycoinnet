@@ -1,7 +1,7 @@
 import asyncio
 import logging
 
-from pycoinnet.async_iterators import iter_to_aiter, parallel_map_aiter, flatten_aiter
+from pycoinnet.aitertools import iter_to_aiter, parallel_map_aiter, flatten_aiter
 from pycoinnet.dnsbootstrap import dns_bootstrap_host_port_iterator
 from pycoinnet.Peer import Peer
 from pycoinnet.version import version_data_for_peer
@@ -39,10 +39,10 @@ def peer_connect_iterator(network, tcp_connect_workers=30, handshake_workers=3,
             return [peer]
 
     reader_writer_iterator = flatten_aiter(parallel_map_aiter(
-        host_iterator, host_port_to_reader_writer, tcp_connect_workers))
+        host_port_to_reader_writer, tcp_connect_workers, host_iterator))
 
     connected_peer_iterator = flatten_aiter(parallel_map_aiter(
-        reader_writer_iterator, peer_handshake, handshake_workers))
+        peer_handshake, handshake_workers, reader_writer_iterator))
 
     return connected_peer_iterator
 

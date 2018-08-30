@@ -3,7 +3,7 @@ import logging
 import weakref
 
 from pycoin.message.InvItem import InvItem, ITEM_TYPE_TX, ITEM_TYPE_BLOCK, ITEM_TYPE_MERKLEBLOCK
-from pycoinnet.async_iterators import stoppable_q, map_aiter, parallel_map_aiter, flatten_aiter
+from pycoinnet.aitertools import q_aiter, map_aiter, parallel_map_aiter, flatten_aiter
 
 
 class InvBatcher:
@@ -74,11 +74,11 @@ class InvBatcher:
             logging.debug("new batch size for %s is %d", peer, new_batch_size)
             await self._peer_batch_queue.put((peer, new_batch_size))
 
-        self._peer_batch_queue = stoppable_q()
+        self._peer_batch_queue = q_aiter()
 
-        peer_batch_info_aiter = flatten_aiter(map_aiter(self._peer_batch_queue, batch_getdata_fetches))
+        peer_batch_info_aiter = flatten_aiter(map_aiter(batch_getdata_fetches, self._peer_batch_queue))
 
-        is_finished_aiter = parallel_map_aiter(peer_batch_info_aiter, fetch_batch, maxsize=2, worker_count=20)
+        is_finished_aiter = parallel_map_aiter(fetch_batch, worker_count=20, aiter=peer_batch_info_aiter, maxsize=2)
 
         async def finish(is_finished_aiter):
             async for _ in is_finished_aiter():

@@ -3,7 +3,7 @@ import logging
 
 from pycoin.message.InvItem import InvItem, ITEM_TYPE_BLOCK
 
-from pycoinnet.async_iterators import stoppable_q, aiter_to_iter, flatten_aiter, map_aiter, join_aiters
+from pycoinnet.aitertools import q_aiter, aiter_to_iter, flatten_aiter, map_aiter, join_aiters
 from pycoinnet.inv_batcher import InvBatcher
 
 
@@ -111,7 +111,7 @@ async def create_header_fetcher(peer_manager, header_q, inv_batcher, blockchain_
 
 
 def make_headers_info_aiter(peer_manager, inv_batcher, blockchain_view, timeout, caught_up_peer_count):
-    header_q = stoppable_q(maxsize=2)
+    header_q = q_aiter(maxsize=2)
     header_q.task = asyncio.ensure_future(create_header_fetcher(
         peer_manager, header_q, inv_batcher, blockchain_view, timeout, caught_up_peer_count))
     return header_q
@@ -161,11 +161,11 @@ def create_fetch_blocks_after_aiter(
 
     map_bibh_to_fi = make_map_bibh_to_fi(inv_batcher, filter_f)
 
-    block_index_aiter = map_aiter(join_aiters(flatten_aiter(
-        map_aiter(join_aiters(
+    block_index_aiter = map_aiter(future_to_block, join_aiters(flatten_aiter(
+        map_aiter(map_bibh_to_fi, join_aiters(
             make_headers_info_aiter(
                 peer_manager, inv_batcher, blockchain_view, timeout, peer_count), maxsize=2),
-                    map_bibh_to_fi)), maxsize=100), future_to_block)
+                    )), maxsize=100))
 
     return block_index_aiter
 
