@@ -35,7 +35,7 @@ def aiter_to_iter(aiter, loop=None):
             _ = loop.run_until_complete(underlying_aiter.__anext__())
             yield _
         except StopAsyncIteration:
-            raise StopIteration
+            break
 
 
 class stoppable_q:
@@ -64,7 +64,7 @@ class stoppable_q:
         return self
 
     async def put(self, item):
-        await self.put(item)
+        await self._q.put(item)
 
     async def __anext__(self):
         while True:

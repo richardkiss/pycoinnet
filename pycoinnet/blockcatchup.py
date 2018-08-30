@@ -23,7 +23,7 @@ class RequestResponder:
         return self._response_futures[(peer, response_message)]
 
 
-async def create_header_fetcher(peer_manager, header_q, inv_batcher, blockchain_view, timeout):
+async def create_header_fetcher(peer_manager, header_q, inv_batcher, blockchain_view, timeout, caught_up_peer_count=8):
     rr = RequestResponder(peer_manager)
 
     caught_up_peers = set()
@@ -53,7 +53,7 @@ async def create_header_fetcher(peer_manager, header_q, inv_batcher, blockchain_
                 peers_to_query.append(peer)
 
         if len(peers_to_query) == 0:
-            if len(caught_up_peers) >= 8:
+            if len(caught_up_peers) >= caught_up_peer_count:
                 break
             best_peer = await peer_q.get()
             continue
@@ -77,9 +77,8 @@ async def create_header_fetcher(peer_manager, header_q, inv_batcher, blockchain_
         if done:
             best_peer, data = await done.pop()
             headers = [bh for bh, t in data["headers"]]
-            for t in pending:
-                t.cancel()
-                await t
+        for t in pending:
+            t.cancel()
 
         while (len(headers) > 0 and
                 headers[0].previous_block_hash != blockchain_view.last_block_tuple()[1]):
@@ -108,14 +107,14 @@ async def create_header_fetcher(peer_manager, header_q, inv_batcher, blockchain_
 
         await header_q.put((block_number, hashes))
 
-    await header_q.put(None)
+    header_q.stop()
 
 
-def make_headers_info_aiter(peer_manager, inv_batcher, blockchain_view, timeout):
-    header_q = asyncio.Queue()
+def make_headers_info_aiter(peer_manager, inv_batcher, blockchain_view, timeout, caught_up_peer_count):
+    header_q = stoppable_q(maxsize=2)
     header_q.task = asyncio.ensure_future(create_header_fetcher(
-        peer_manager, header_q, inv_batcher, blockchain_view, timeout))
-    return stoppable_q(header_q)
+        peer_manager, header_q, inv_batcher, blockchain_view, timeout, caught_up_peer_count))
+    return header_q
 
 
 def make_map_bibh_to_fi(inv_batcher, filter_f):
@@ -153,7 +152,7 @@ async def future_to_block(next_item):
 
 
 def create_fetch_blocks_after_aiter(
-        peer_manager, blockchain_view, filter_f=None, timeout=10.0, loop=None):
+        peer_manager, blockchain_view, peer_count, filter_f=None, timeout=10.0, loop=None):
     # return a Queue that gets filled with blocks until we run out
 
     inv_batcher = InvBatcher(peer_manager)
@@ -165,11 +164,11 @@ def create_fetch_blocks_after_aiter(
     block_index_aiter = map_aiter(join_aiters(flatten_aiter(
         map_aiter(join_aiters(
             make_headers_info_aiter(
-                peer_manager, inv_batcher, blockchain_view, timeout), maxsize=2),
+                peer_manager, inv_batcher, blockchain_view, timeout, peer_count), maxsize=2),
                     map_bibh_to_fi)), maxsize=100), future_to_block)
 
     return block_index_aiter
 
 
-def fetch_blocks_after(peer_manager, blockchain_view, filter_f=None):
-    return aiter_to_iter(create_fetch_blocks_after_aiter(peer_manager, blockchain_view, filter_f))
+def fetch_blocks_after(peer_manager, blockchain_view, peer_count, filter_f=None):
+    return aiter_to_iter(create_fetch_blocks_after_aiter(peer_manager, blockchain_view, peer_count, filter_f))

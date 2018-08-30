@@ -475,7 +475,8 @@ def block_iterator(args, wallet):
         if bh.timestamp >= early_timestamp:
             return ITEM_TYPE_MERKLEBLOCK if args.spv else ITEM_TYPE_BLOCK
 
-    return fetch_blocks_after(peer_manager, wallet.blockchain_view(), filter_f=filter_f)
+    peer_count = len(args.peer) or 8
+    return fetch_blocks_after(peer_manager, wallet.blockchain_view(), peer_count, filter_f=filter_f)
 
 
 def wallet_fetch(args):
