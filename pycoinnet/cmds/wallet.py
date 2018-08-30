@@ -450,22 +450,12 @@ def commit_to_persistence(wallet, blockchain_view, last_block_index, when=None):
             last_block_index, datetime.datetime.fromtimestamp(when)))
 
 
-def wallet_fetch(args):
-    wallet = wallet_for_args(args)
+def block_iterator(args, wallet):
 
-    wallet.ensure_minimal_gap_limit()
-
-    last_block_index = wallet.last_block_index()
-    blockchain_view = wallet.blockchain_view()
-    blockchain_view.rewind(last_block_index)
-    wallet.rewind(last_block_index)
-
-    spendables = list(wallet.unspent_spendables(last_block_index, args.network.tx.Spendable))
+    spendables = list(wallet.unspent_spendables(wallet.last_block_index(), args.network.tx.Spendable))
 
     bloom_filter = bloom_filter_for_addresses_spendables(
         wallet.hash160_set(), spendables, element_pad_count=2000)
-
-    early_timestamp = calendar.timegm(args.date)
 
     filter_bytes, hash_function_count, tweak = bloom_filter.filter_load_params()
     flags = 1  # BLOOM_UPDATE_ALL = 1  # BRAIN DAMAGE
@@ -479,13 +469,28 @@ def wallet_fetch(args):
     peer_manager = PeerManager(peer_iterator, args.count, got_new_peer)
     install_pong_manager(peer_manager)
 
+    early_timestamp = calendar.timegm(args.date)
+
     def filter_f(bh, pri):
         if bh.timestamp >= early_timestamp:
             return ITEM_TYPE_MERKLEBLOCK if args.spv else ITEM_TYPE_BLOCK
 
+    return fetch_blocks_after(peer_manager, wallet.blockchain_view(), filter_f=filter_f)
+
+
+def wallet_fetch(args):
+    wallet = wallet_for_args(args)
+
+    wallet.ensure_minimal_gap_limit()
+
+    last_block_index = wallet.last_block_index()
+    blockchain_view = wallet.blockchain_view()
+    blockchain_view.rewind(last_block_index)
+    wallet.rewind(last_block_index)
+
     last_save_time = time.time()
-    for block, last_block_index in fetch_blocks_after(
-            peer_manager, wallet.blockchain_view(), filter_f=filter_f):
+
+    for block, last_block_index in block_iterator(args, wallet):
         logging.debug("last_block_index = %s (%s)", last_block_index,
                       datetime.datetime.fromtimestamp(block.timestamp))
         txs = block.txs
