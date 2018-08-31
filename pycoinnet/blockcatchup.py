@@ -3,7 +3,7 @@ import logging
 
 from pycoin.message.InvItem import InvItem, ITEM_TYPE_BLOCK
 
-from pycoinnet.aitertools import q_aiter, aiter_to_iter, flatten_aiter, map_aiter, join_aiters
+from pycoinnet.aitertools import q_aiter, aiter_to_iter, flatten_aiter, map_aiter
 from pycoinnet.inv_batcher import InvBatcher
 
 
@@ -43,7 +43,7 @@ async def get_peers_to_query(best_peer, caught_up_peers, desired_caught_up_peer_
     return peers_to_query
 
 
-async def create_header_fetcher(peer_manager, header_q, inv_batcher, blockchain_view, timeout, desired_caught_up_peer_count=8):
+async def create_header_fetcher(peer_manager, header_aiter, inv_batcher, blockchain_view, timeout, desired_caught_up_peer_count=8):
     """
     Given a peer_manager (which is a set of peers) and a blockchain view, we query peers
     for headers messages until enough of them say we're all caught up.
@@ -123,16 +123,16 @@ async def create_header_fetcher(peer_manager, header_q, inv_batcher, blockchain_
             assert headers[idx].hash() == the_tuple[1]
             hashes.append(headers[idx])
 
-        await header_q.put((block_number, hashes))
+        await header_aiter.push((block_number, hashes))
 
-    header_q.stop()
+    header_aiter.stop()
 
 
 def make_headers_info_aiter(peer_manager, inv_batcher, blockchain_view, timeout, desired_caught_up_peer_count):
-    header_q = q_aiter(maxsize=2)
-    header_q.task = asyncio.ensure_future(create_header_fetcher(
-        peer_manager, header_q, inv_batcher, blockchain_view, timeout, desired_caught_up_peer_count))
-    return header_q
+    header_aiter = q_aiter(maxsize=2)
+    header_aiter.task = asyncio.ensure_future(create_header_fetcher(
+        peer_manager, header_aiter, inv_batcher, blockchain_view, timeout, desired_caught_up_peer_count))
+    return header_aiter
 
 
 def make_map_bibh_to_fi(inv_batcher, filter_f):
@@ -179,11 +179,11 @@ def create_fetch_blocks_after_aiter(
 
     map_bibh_to_fi = make_map_bibh_to_fi(inv_batcher, filter_f)
 
-    block_index_aiter = map_aiter(future_to_block, join_aiters(flatten_aiter(
-        map_aiter(map_bibh_to_fi, join_aiters(
-            make_headers_info_aiter(
-                peer_manager, inv_batcher, blockchain_view, timeout, peer_count), maxsize=2),
-                    )), maxsize=100))
+    block_index_aiter = map_aiter(future_to_block, flatten_aiter(
+        map_aiter(map_bibh_to_fi, make_headers_info_aiter(
+            peer_manager, inv_batcher, blockchain_view, timeout, peer_count)),
+                )
+            )
 
     return block_index_aiter
 

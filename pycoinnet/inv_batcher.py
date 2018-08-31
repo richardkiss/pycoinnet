@@ -17,7 +17,6 @@ class InvBatcher:
             peer, desired_batch_size = peer_batch_tuple
             batch = []
             skipped = []
-            logging.debug("peer %s building batch max size %d", peer, desired_batch_size)
             while len(batch) == 0 or (
                     len(batch) < desired_batch_size and not self._inv_item_future_queue.empty()):
                 item = await self._inv_item_future_queue.get()
@@ -29,9 +28,10 @@ class InvBatcher:
                 else:
                     batch.append(item)
             if len(batch) > 0:
+                logging.debug("peer %s built batch with size %d (max %d)", peer, len(batch), desired_batch_size)
                 return [(peer, batch, desired_batch_size)]
             else:
-                await self._peer_batch_queue.put((peer, desired_batch_size))
+                await self._peer_batch_aiter.put((peer, desired_batch_size))
             for item in skipped:
                 if not item[2].done:
                     await self._inv_item_future_queue.put(item)
@@ -74,13 +74,13 @@ class InvBatcher:
             new_batch_size = min(prior_max * 4, int(target_batch_time * item_per_unit_time + 0.5))
             new_batch_size = min(max(1, new_batch_size), max_batch_size)
             logging.debug("new batch size for %s is %d", peer, new_batch_size)
-            await self._peer_batch_queue.put((peer, new_batch_size))
+            await self._peer_batch_aiter.push((peer, new_batch_size))
 
-        self._peer_batch_queue = q_aiter(maxsize=0)
+        self._peer_batch_aiter = q_aiter(maxsize=0)
 
-        peer_batch_info_aiter = flatten_aiter(map_aiter(batch_getdata_fetches, self._peer_batch_queue))
+        peer_batch_info_aiter = flatten_aiter(map_aiter(batch_getdata_fetches, self._peer_batch_aiter))
 
-        is_finished_aiter = parallel_map_aiter(fetch_batch, worker_count=20, aiter=peer_batch_info_aiter, maxsize=2)
+        is_finished_aiter = parallel_map_aiter(fetch_batch, worker_count=20, aiter=peer_batch_info_aiter)
 
         async def finish(is_finished_aiter):
             async for _ in is_finished_aiter:
@@ -95,8 +95,8 @@ class InvBatcher:
     def handle_event(self, peer, message, data):
         if message is None:
             initial_batch_size = 1
-            self._peer_batch_queue.put_nowait((peer, initial_batch_size))
-            self._peer_batch_queue.put_nowait((peer, initial_batch_size))
+            self._peer_batch_aiter.push_nowait((peer, initial_batch_size))
+            self._peer_batch_aiter.push_nowait((peer, initial_batch_size))
             return
         f = {
                 "block": self.handle_block_event,
@@ -115,7 +115,7 @@ class InvBatcher:
         return f
 
     def stop(self):
-        self._peer_batch_queue.stop()
+        self._peer_batch_aiter.stop()
 
     def register_interest(self, inv_item):
         f = self._inv_item_hash_to_future.get(inv_item)

@@ -6,7 +6,7 @@ from pycoinnet.aitertools import q_aiter, flatten_aiter, map_aiter, parallel_map
 
 async def flatten_callback(items, output_q):
     for item in items:
-        await output_q.put(item)
+        await output_q.push(item)
 
 
 def run(f):
@@ -32,15 +32,15 @@ class test_aitertools(unittest.TestCase):
     def test_q_aiter(self):
 
         async def go(q, results):
-            await q.put(5)
-            q.put_nowait(4)
-            await q.put(3)
+            await q.push(5)
+            q.push_nowait(4)
+            await q.push(3)
             q.stop()
-            await q.put(2)
+            self.assertRaises(ValueError, lambda: run(q.push_nowait(2)))
             async for _ in q:
                 results.append(_)
 
-        q = q_aiter()
+        q = q_aiter(maxsize=0)
         results = []
         run(go(q, results))
         self.assertEqual(results, [5, 4, 3])
@@ -54,13 +54,13 @@ class test_aitertools(unittest.TestCase):
             return async_transformation_f
 
         async def go(q):
-            await q.put(5)
-            await q.put(4)
-            await q.put(3)
+            await q.push(5)
+            await q.push(4)
+            await q.push(3)
             q.stop()
 
         results = []
-        q = q_aiter()
+        q = q_aiter(maxsize=0)
         aiter = map_aiter(make_async_transformation_f(results), q)
         run(go(q))
         self.assertEqual(results, [])
@@ -70,13 +70,13 @@ class test_aitertools(unittest.TestCase):
 
     def test_flatten_aiter(self):
         async def go():
-            q = q_aiter()
+            q = q_aiter(maxsize=0)
             fi = flatten_aiter(q)
             r = []
-            await q.put([0, 1, 2, 3])
+            await q.push([0, 1, 2, 3])
 
             r.extend(await get_n(fi, 3))
-            await q.put([4, 5, 6, 7])
+            await q.push([4, 5, 6, 7])
             r.extend(await get_n(fi, 5))
             q.stop()
             r.extend(await get_n(fi))
@@ -91,12 +91,12 @@ class test_aitertools(unittest.TestCase):
             return x * x
 
         async def go():
-            q = q_aiter()
+            q = q_aiter(maxsize=0)
             aiter = map_aiter(map_f, q)
             for _ in range(4):
-                await q.put(_)
+                await q.push(_)
             for _ in range(3, 9):
-                await q.put(_)
+                await q.push(_)
             r = await get_n(aiter, 10)
             q.stop()
             r.extend(await get_n(aiter))
@@ -109,9 +109,9 @@ class test_aitertools(unittest.TestCase):
     def test_make_simple_pipeline(self):
 
         async def go():
-            q = q_aiter()
+            q = q_aiter(maxsize=0)
             aiter = flatten_aiter(flatten_aiter(q))
-            await q.put([
+            await q.push([
                 (0, 0, 1, 0),
                 (1, 1, 1, 1),
                 (2, 0, 0, 1),
@@ -133,7 +133,7 @@ class test_aitertools(unittest.TestCase):
 
             async def wait(item, q):
                 await asyncio.sleep(item[idx] / 10.)
-                await q.put(item)
+                await q.push(item)
 
             return wait
 
@@ -147,14 +147,14 @@ class test_aitertools(unittest.TestCase):
         ]
 
         async def go(case):
-            q = q_aiter()
+            q = q_aiter(maxsize=0)
             aiter = flatten_aiter(
                 parallel_map_aiter(make_wait_index(0), 10,
                     parallel_map_aiter(make_wait_index(1), 10,
                         parallel_map_aiter(make_wait_index(2), 10,
                             parallel_map_aiter(make_wait_index(3), 10, q
             )))))
-            await q.put(case)
+            await q.push(case)
             q.stop()
             r = [_ async for _ in aiter]
             return r
@@ -181,9 +181,9 @@ class test_aitertools(unittest.TestCase):
         ]
 
         async def go(case):
-            q = q_aiter()
+            q = q_aiter(maxsize=0)
             aiter = flatten_aiter(map_aiter(filter, q))
-            await q.put(case)
+            await q.push(case)
             r = await get_n(aiter, 12)
             q.stop()
             return r

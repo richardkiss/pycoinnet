@@ -44,12 +44,13 @@ class q_aiter:
     Call "stop" when no more items will be added to the queue, so the iterator
     knows to end.
     """
-    def __init__(self, q=None, maxsize=0):
+    def __init__(self, q=None, maxsize=1, full_callback=None):
         if q is None:
             q = asyncio.Queue(maxsize=maxsize)
         self._q = q
         self._stopping = asyncio.Future()
         self._stopped = False
+        self._full_callback = full_callback
 
     def stop(self):
         """
@@ -62,13 +63,19 @@ class q_aiter:
     def q(self):
         return self._q
 
-    async def put(self, item):
-        if not self._stopping.done():
-            await self._q.put(item)
+    async def push(self, item):
+        if self._stopping.done():
+            raise ValueError("%s closed" % self)
+        if self._full_callback and self._q.full():
+            self._full_callback(self, item)
+        await self._q.put(item)
 
-    def put_nowait(self, item):
-        if not self._stopping.done():
-            self._q.put_nowait(item)
+    def push_nowait(self, item):
+        if self._stopping.done():
+            raise ValueError("%s closed" % self)
+        if self._full_callback and self._q.full():
+            self._full_callback(self, item)
+        self._q.put_nowait(item)
 
     def __aiter__(self):
         return self
@@ -98,22 +105,27 @@ class join_aiters(q_aiter):
     """
     Takes a list of async iterators and pipes them into a single async iterator.
     """
-    def __init__(self, *aiters, q=None, maxsize=1):
+    def __init__(self, _aiter_of_aiters, q=None, maxsize=1):
         super(join_aiters, self).__init__(q=q, maxsize=maxsize)
-        self._task = asyncio.ensure_future(self._monitor_task(
-            asyncio.gather(*[asyncio.ensure_future(self._worker(_)) for _ in aiters])))
+        self._task_dict = {}
+        self._aiter_of_aiters = _aiter_of_aiters
+        self._task = asyncio.ensure_future(self._add_task())
+
+    async def _add_task(self):
+        async for aiter in self._aiter_of_aiters:
+            self._task_dict[aiter] = asyncio.ensure_future(self._worker(aiter))
+        for task in list(self._task_dict.values()):
+            await task
+        self.stop()
 
     async def _worker(self, aiter):
         async for _ in aiter:
-            await self._q.put(_)
-
-    async def _monitor_task(self, task):
-        await task
-        self.stop()
+            await self.push(_)
+        del self._task_dict[aiter]
 
 
 def sharable_aiter(aiter):
-    return join_aiters(aiter, maxsize=1)
+    return join_aiters(iter_to_aiter([aiter]), maxsize=1)
 
 
 class map_aiter:
@@ -154,7 +166,7 @@ class flatten_aiter(q_aiter):
         async for items in self._aiter:
             if items:
                 for _ in items:
-                    await self._q.put(_)
+                    await self.push(_)
         self.stop()
 
     def __repr__(self):
@@ -164,4 +176,4 @@ class flatten_aiter(q_aiter):
 def parallel_map_aiter(map_f, worker_count, aiter, maxsize=1):
     shared_aiter = sharable_aiter(aiter)
     aiters = [map_aiter(map_f, shared_aiter) for _ in range(worker_count)]
-    return join_aiters(*aiters, maxsize=maxsize)
+    return join_aiters(iter_to_aiter(aiters), maxsize=maxsize)

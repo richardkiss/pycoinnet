@@ -50,7 +50,7 @@ def peer_address_to_hostport(peer_address, default_port):
 
 
 def peer_addresses_to_host_aiter(network, peer_addresses=[]):
-    hostports = [peer_address_to_hostport(_, network) for _ in peer_addresses]
+    hostports = [peer_address_to_hostport(_, network.default_port) for _ in peer_addresses]
     if hostports:
         return iter_to_aiter(hostports)
     return dns_bootstrap_host_port_iterator(network)
