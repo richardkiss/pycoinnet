@@ -50,13 +50,13 @@ def peer_address_to_hostport(peer_address, default_port):
 
 
 def peer_addresses_to_host_aiter(network, peer_addresses=[]):
-    hostports = [peer_address_to_hostport(_, network.default_port) for _ in peer_addresses]
-    if hostports:
+    if peer_addresses:
+        hostports = [peer_address_to_hostport(_, network.default_port) for _ in peer_addresses]
         return iter_to_aiter(hostports)
     return dns_bootstrap_host_port_iterator(network)
 
 
-def get_peer_iterator(network, peer_addresses=None):
+def get_peer_iterator(network, peer_addresses=[]):
     # BRAIN DAMAGE: 70016 version number is required for bgold new block header format
     host_aiter = peer_addresses_to_host_aiter(network, peer_addresses)
     return connected_peer_iterator(network, host_aiter=host_aiter, version_dict=dict(version=70016))

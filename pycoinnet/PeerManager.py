@@ -4,10 +4,9 @@ import logging
 
 class PeerManager:
     # TODO: handle incoming
-    def __init__(self, peer_iterator, desired_peer_count, new_peer_async_callback=lambda peer: None):
-        self._peer_iterator = peer_iterator
+    def __init__(self, peer_aiter, desired_peer_count):
+        self._peer_aiter = peer_aiter
         self._desired_peer_count = desired_peer_count
-        self._new_peer_async_callback = new_peer_async_callback
         self._peers = set()
         self._event_callback_index = 0
         self._event_callbacks = {}  # BRAIN DAMAGE: weakref.WeakValueDictionary()
@@ -32,7 +31,6 @@ class PeerManager:
         self.close_all()
 
     async def _peer_lifecycle(self, peer):
-        await self._new_peer_async_callback(peer)
         self._peers.add(peer)
         # tell children
         for callback in list(self._event_callbacks.values()):
@@ -43,7 +41,7 @@ class PeerManager:
         self._peers.remove(peer)
 
     async def _maintain_outgoing(self):
-        async for peer in self._peer_iterator:
+        async for peer in self._peer_aiter:
             if not self._is_running:
                 break
             await self._peer_lifecycle(peer)

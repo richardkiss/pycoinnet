@@ -40,7 +40,7 @@ def aiter_to_iter(aiter, loop=None):
 
 class q_aiter:
     """
-    Creates an async iterator that you can "put" items into.
+    Creates an async iterator that you can "push" items into.
     Call "stop" when no more items will be added to the queue, so the iterator
     knows to end.
     """
@@ -171,6 +171,15 @@ class flatten_aiter(q_aiter):
 
     def __repr__(self):
         return "<flatten_aiter wrapping %s>" % self._aiter
+
+
+def map_filter_aiter(map_f, aiter):
+    """
+    In this case, the map_f must return a list, which will be flattened.
+    You can filter items by returning an empty list.
+    """
+    return flatten_aiter(map_aiter(map_f, aiter))
+
 
 
 def parallel_map_aiter(map_f, worker_count, aiter, maxsize=1):

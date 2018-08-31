@@ -15,6 +15,7 @@ setup(
     ],
     entry_points={'console_scripts': [
         'wallet = pycoinnet.cmds.wallet:main',
+        'get_block = pycoinnet.cmds.get_block:main',
         'pushtx = pycoinnet.cmds.pushtx:main',
     ]},
     install_requires=REQUIREMENTS,

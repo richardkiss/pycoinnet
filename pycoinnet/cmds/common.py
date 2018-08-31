@@ -1,12 +1,12 @@
-"""
-This tool gets all headers quickly and prints summary of chain state.
-"""
-
 import asyncio
 import logging
 import os.path
 
+from pycoinnet.aitertools import map_aiter
 from pycoinnet.BlockChainView import BlockChainView
+from pycoinnet.PeerManager import PeerManager
+from pycoinnet.peer_pipeline import get_peer_iterator
+from pycoinnet.pong_manager import install_pong_manager
 
 
 LOG_FORMAT = '%(asctime)s [%(process)d] [%(levelname)s] %(filename)s:%(lineno)d %(message)s'
@@ -49,3 +49,24 @@ def save_bcv(path, bcv):
     with open(tmp, "w") as f:
         f.write(json)
     os.rename(tmp, path)
+
+
+def peer_manager_for_args(args, bloom_filter=None):
+
+    peer_iterator = get_peer_iterator(args.network, args.peer)
+
+    if bloom_filter:
+        filter_bytes, hash_function_count, tweak = bloom_filter.filter_load_params()
+        flags = 1  # BLOOM_UPDATE_ALL = 1  # BRAIN DAMAGE
+
+        async def got_new_peer(peer):
+            if args.spv:
+                peer.send_msg("filterload", filter=filter_bytes, tweak=tweak,
+                              hash_function_count=hash_function_count, flags=flags)
+            return peer
+
+        peer_iterator = map_aiter(got_new_peer, peer_iterator)
+
+    peer_manager = PeerManager(peer_iterator, getattr(args, "count", 4))
+    install_pong_manager(peer_manager)
+    return peer_manager

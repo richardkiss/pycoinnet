@@ -26,15 +26,11 @@ from pycoin.message.InvItem import ITEM_TYPE_BLOCK, ITEM_TYPE_MERKLEBLOCK
 from pycoin.coins.tx_utils import create_tx
 
 from pycoinnet.BlockChainView import BlockChainView
-from pycoinnet.pong_manager import install_pong_manager
-
 from pycoinnet.blockcatchup import fetch_blocks_after
-from pycoinnet.peer_pipeline import get_peer_iterator
-from pycoinnet.PeerManager import PeerManager
 
 from .MultisigKey import parse_MultisigKey
 
-from .common import init_logging
+from .common import init_logging, peer_manager_for_args
 
 
 class DB:
@@ -457,17 +453,7 @@ def block_iterator(args, wallet):
     bloom_filter = bloom_filter_for_addresses_spendables(
         wallet.hash160_set(), spendables, element_pad_count=2000)
 
-    filter_bytes, hash_function_count, tweak = bloom_filter.filter_load_params()
-    flags = 1  # BLOOM_UPDATE_ALL = 1  # BRAIN DAMAGE
-
-    async def got_new_peer(peer):
-        if args.spv:
-            peer.send_msg("filterload", filter=filter_bytes, tweak=tweak,
-                          hash_function_count=hash_function_count, flags=flags)
-
-    peer_iterator = get_peer_iterator(args.network, args.peer)
-    peer_manager = PeerManager(peer_iterator, args.count, got_new_peer)
-    install_pong_manager(peer_manager)
+    peer_manager = peer_manager_for_args(args, bloom_filter)
 
     early_timestamp = calendar.timegm(args.date)
 
