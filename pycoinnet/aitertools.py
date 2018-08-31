@@ -87,8 +87,7 @@ class q_aiter:
             q_get = asyncio.ensure_future(self._q.get())
             done, pending = await asyncio.wait([self._stopping, q_get], return_when=asyncio.FIRST_COMPLETED)
             if q_get in done:
-                v = q_get.result()
-                return v
+                return q_get.result()
             q_get.cancel()
 
     def __repr__(self):
@@ -99,7 +98,7 @@ class join_aiters(q_aiter):
     """
     Takes a list of async iterators and pipes them into a single async iterator.
     """
-    def __init__(self, *aiters, q=None, maxsize=0):
+    def __init__(self, *aiters, q=None, maxsize=1):
         super(join_aiters, self).__init__(q=q, maxsize=maxsize)
         self._task = asyncio.ensure_future(self._monitor_task(
             asyncio.gather(*[asyncio.ensure_future(self._worker(_)) for _ in aiters])))

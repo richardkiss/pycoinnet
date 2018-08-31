@@ -23,9 +23,37 @@ class RequestResponder:
         return self._response_futures[(peer, response_message)]
 
 
-async def create_header_fetcher(peer_manager, header_q, inv_batcher, blockchain_view, timeout, caught_up_peer_count=8):
+async def get_peers_to_query(best_peer, caught_up_peers, desired_caught_up_peer_count, peer_q, peer_manager):
+
+    peers_to_query, peers_needed = [], desired_caught_up_peer_count
+    if best_peer:
+        peers_to_query, peers_needed = [best_peer], 2
+
+    while len(peers_to_query) < peers_needed:
+        if peer_q.empty():
+            for p in peer_manager.peers():
+                if p and p not in peers_to_query and p not in caught_up_peers and not p.is_closing():
+                    peer_q.put_nowait(p)
+        if peer_q.empty():
+            # still empty
+            break
+        peer = await peer_q.get()
+        if peer not in peers_to_query and peer is not None:
+            peers_to_query.append(peer)
+    return peers_to_query
+
+
+async def create_header_fetcher(peer_manager, header_q, inv_batcher, blockchain_view, timeout, desired_caught_up_peer_count=8):
+    """
+    Given a peer_manager (which is a set of peers) and a blockchain view, we query peers
+    for headers messages until enough of them say we're all caught up.
+    """
+
+    # this RequestResponder is a gross hack, here for now. We need a better home for this functionaliy. Maybe PeerManager.
+
     rr = RequestResponder(peer_manager)
 
+    # the list of peers that think we're all caught up
     caught_up_peers = set()
 
     peer_q = asyncio.Queue()
@@ -39,23 +67,11 @@ async def create_header_fetcher(peer_manager, header_q, inv_batcher, blockchain_
     best_peer = None
 
     while True:
-        peers_to_query, peers_needed = [], caught_up_peer_count
-        if best_peer:
-            peers_to_query, peers_needed = [best_peer], 2
-        while len(peers_to_query) < peers_needed:
-            if peer_q.empty():
-                for p in peer_manager.peers():
-                    if p and p not in peers_to_query and p not in caught_up_peers and not p.is_closing():
-                        peer_q.put_nowait(p)
-            if peer_q.empty():
-                # still empty
-                break
-            peer = await peer_q.get()
-            if peer not in peers_to_query and peer is not None:
-                peers_to_query.append(peer)
+        peers_to_query = await get_peers_to_query(
+            best_peer, caught_up_peers, desired_caught_up_peer_count, peer_q, peer_manager)
 
         if len(peers_to_query) == 0:
-            if len(caught_up_peers) >= caught_up_peer_count:
+            if len(caught_up_peers) >= desired_caught_up_peer_count:
                 break
             best_peer = await peer_q.get()
             continue
@@ -112,10 +128,10 @@ async def create_header_fetcher(peer_manager, header_q, inv_batcher, blockchain_
     header_q.stop()
 
 
-def make_headers_info_aiter(peer_manager, inv_batcher, blockchain_view, timeout, caught_up_peer_count):
+def make_headers_info_aiter(peer_manager, inv_batcher, blockchain_view, timeout, desired_caught_up_peer_count):
     header_q = q_aiter(maxsize=2)
     header_q.task = asyncio.ensure_future(create_header_fetcher(
-        peer_manager, header_q, inv_batcher, blockchain_view, timeout, caught_up_peer_count))
+        peer_manager, header_q, inv_batcher, blockchain_view, timeout, desired_caught_up_peer_count))
     return header_q
 
 

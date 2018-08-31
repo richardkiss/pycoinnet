@@ -30,6 +30,8 @@ class InvBatcher:
                     batch.append(item)
             if len(batch) > 0:
                 return [(peer, batch, desired_batch_size)]
+            else:
+                await self._peer_batch_queue.put((peer, desired_batch_size))
             for item in skipped:
                 if not item[2].done:
                     await self._inv_item_future_queue.put(item)
@@ -74,14 +76,14 @@ class InvBatcher:
             logging.debug("new batch size for %s is %d", peer, new_batch_size)
             await self._peer_batch_queue.put((peer, new_batch_size))
 
-        self._peer_batch_queue = q_aiter()
+        self._peer_batch_queue = q_aiter(maxsize=0)
 
         peer_batch_info_aiter = flatten_aiter(map_aiter(batch_getdata_fetches, self._peer_batch_queue))
 
         is_finished_aiter = parallel_map_aiter(fetch_batch, worker_count=20, aiter=peer_batch_info_aiter, maxsize=2)
 
         async def finish(is_finished_aiter):
-            async for _ in is_finished_aiter():
+            async for _ in is_finished_aiter:
                 pass
 
         self._task = asyncio.ensure_future(finish(is_finished_aiter))
