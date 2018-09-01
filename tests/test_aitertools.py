@@ -1,7 +1,10 @@
 import asyncio
 import unittest
 
-from pycoinnet.aitertools import q_aiter, flatten_aiter, map_aiter, parallel_map_aiter
+from pycoinnet.aitertools import (
+    azip, aiter_forker, flatten_aiter, iter_to_aiter,
+    q_aiter, map_aiter, parallel_map_aiter, join_aiters, rated_aiter
+)
 
 
 async def flatten_callback(items, output_q):
@@ -128,12 +131,29 @@ class test_aitertools(unittest.TestCase):
         r = run(go())
         self.assertEqual(r, [0, 0, 1, 0, 1, 1, 1, 1, 2, 0, 0, 1, 3, 1, 2, 0, 0, 0, 0, 7])
 
+    def test_join_aiters(self):
+        int_vals = [1, 2, 3, 4]
+        str_vals = "abcdefg"
+
+        async def go(list_of_lists):
+            iter_of_aiters = [iter_to_aiter(_) for _ in list_of_lists]
+            r = []
+            async for _ in join_aiters(iter_to_aiter(iter_of_aiters)):
+                r.append(_)
+            return r
+
+        r = run(go([int_vals, str_vals]))
+        r1 = [_ for _ in r if isinstance(_, int)]
+        r2 = [_ for _ in r if isinstance(_, str)]
+        self.assertEqual(r1, int_vals)
+        self.assertEqual(r2, list(str_vals))
+
     def test_make_delayed_pipeline(self):
         def make_wait_index(idx):
 
-            async def wait(item, q):
+            async def wait(item):
                 await asyncio.sleep(item[idx] / 10.)
-                await q.push(item)
+                return item
 
             return wait
 
@@ -148,13 +168,12 @@ class test_aitertools(unittest.TestCase):
 
         async def go(case):
             q = q_aiter(maxsize=0)
-            aiter = flatten_aiter(
-                parallel_map_aiter(make_wait_index(0), 10,
-                    parallel_map_aiter(make_wait_index(1), 10,
-                        parallel_map_aiter(make_wait_index(2), 10,
-                            parallel_map_aiter(make_wait_index(3), 10, q
-            )))))
-            await q.push(case)
+            aiter = parallel_map_aiter(make_wait_index(0), 10,
+                        parallel_map_aiter(make_wait_index(1), 10,
+                            parallel_map_aiter(make_wait_index(2), 10,
+                                parallel_map_aiter(make_wait_index(3), 10, q
+            ))))
+            await q.push(*case)
             q.stop()
             r = [_ async for _ in aiter]
             return r
@@ -190,3 +209,45 @@ class test_aitertools(unittest.TestCase):
         r = run(go(TEST_CASE))
         r1 = [7, 5, 1, 1, 1, 1, 1, 2, 1, 3, 1, 2]
         self.assertEqual(r, r1)
+
+    def test_aiter_forker(self):
+
+        async def go():
+            q = q_aiter(maxsize=0)
+            forker = aiter_forker(q)
+            await q.push(1, 2, 3, 4, 5)
+            r0 = await get_n(forker, 3)
+            f2 = forker.new_fork()
+            await q.push(*range(7, 14))
+            q.stop()
+            r1 = await get_n(forker)
+            r2 = await get_n(f2)
+            return r0, r1, r2
+        r0, r1, r2 = run(go())
+        self.assertEqual(r0, [1, 2, 3])
+        self.assertEqual(r1, [4, 5, 7, 8, 9, 10, 11, 12, 13])
+        self.assertEqual(r2, [4, 5, 7, 8, 9, 10, 11, 12, 13])
+
+    def test_azip(self):
+        i1 = ("abcdefgh")
+        i2 = list(range(20))
+        i3 = list(str(_) for _ in range(20))
+        ai1 = iter_to_aiter(i1)
+        ai2 = iter_to_aiter(i2)
+        ai3 = iter_to_aiter(i3)
+        ai = azip(ai1, ai2, ai3)
+        r = run(get_n(ai))
+        self.assertEqual(r, list(zip(i1, i2, i3)))
+
+    def test_rated_aiter(self):
+        i1 = list(range(30))
+        ai = iter_to_aiter(i1)
+        rate_limiter = q_aiter()
+        aiter = rated_aiter(rate_limiter, ai)
+        rate_limiter.push_nowait(9)
+        r = run(get_n(aiter, 3))
+        r.extend(run(get_n(aiter, 4)))
+        rate_limiter.push_nowait(11)
+        rate_limiter.stop()
+        r.extend(run(get_n(aiter)))
+        self.assertEqual(r, list(range(20)))
