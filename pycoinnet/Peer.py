@@ -84,11 +84,19 @@ class Peer:
             message_data = self._parse_from_data(message_name, message_data)
         return message_name, message_data
 
+    async def event_aiter(self, unpack_to_dict=True):
+        while True:
+            _ = await self.next_message(unpack_to_dict)
+            if _ is None:
+                break
+            yield _
+
     def write_eof(self):
         self._writer.write_eof()
 
     def close(self):
-        self._is_closed.set_result(None)
+        if not self._is_closed.done():
+            self._is_closed.set_result(None)
         self._writer.close()
 
     def is_closing(self):

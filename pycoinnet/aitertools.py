@@ -97,25 +97,21 @@ class q_aiter:
         return "<q_aiter %s>" % self._q
 
 
-async def sharable_aiter(aiter, q=None, maxsize=1):
+class sharable_aiter:
     """
     Pipe an iterator through a queue to ensure that it can be shared by multiple consumers.
 
     This creates a task to monitor the main iterator, plus a task for each active
     iterator that has come out of the main iterator.
     """
-    q = q_aiter(q=q, maxsize=maxsize)
+    def __init__(self, aiter):
+        self._aiter = aiter.__aiter__()
 
-    async def worker(aiter):
-        async for _ in aiter:
-            await q.push(_)
-        q.stop()
+    def __aiter__(self):
+        return self
 
-    task = asyncio.ensure_future(worker(aiter))
-    async for _ in q:
-        yield _
-
-    await task
+    async def __anext__(self):
+        return await self._aiter.__anext__()
 
 
 async def join_aiters(aiter_of_aiters):
@@ -132,26 +128,26 @@ async def join_aiters(aiter_of_aiters):
         """
         try:
             v = await aiter.__anext__()
-            return [v], [lambda: aiter_to_next_job(aiter)]
+            return [v], [asyncio.ensure_future(aiter_to_next_job(aiter))]
         except StopAsyncIteration:
             return [], []
 
     async def main_aiter_to_next_job(aiter_of_aiters):
         try:
             new_aiter = await aiter_of_aiters.__anext__()
-            return [], [lambda: aiter_to_next_job(new_aiter.__aiter__()), lambda: main_aiter_to_next_job(aiter_of_aiters)]
+            return [], [asyncio.ensure_future(aiter_to_next_job(new_aiter.__aiter__())), asyncio.ensure_future(main_aiter_to_next_job(aiter_of_aiters))]
         except StopAsyncIteration:
             return [], []
 
     jobs = set([main_aiter_to_next_job(aiter_of_aiters.__aiter__())])
 
     while jobs:
-        done, jobs = await asyncio.wait(jobs)
+        done, jobs = await asyncio.wait(jobs, return_when=asyncio.FIRST_COMPLETED)
         for _ in done:
             new_items, new_jobs = await _
             for _ in new_items:
                 yield _
-            jobs.update(_() for _ in new_jobs)
+            jobs.update(_ for _ in new_jobs)
 
 
 async def map_aiter(map_f, aiter):
@@ -210,9 +206,20 @@ async def map_filter_aiter(map_f, aiter):
 
 
 def parallel_map_aiter(map_f, worker_count, aiter, q=None, maxsize=1):
-    shared_aiter = sharable_aiter(aiter, q=q, maxsize=maxsize)
+    shared_aiter = sharable_aiter(aiter)
     aiters = [map_aiter(map_f, shared_aiter) for _ in range(worker_count)]
     return join_aiters(iter_to_aiter(aiters))
+
+
+class _active_forked_aiter(q_aiter):
+    def __init__(self, empty_callback_f):
+        super(_active_forked_aiter, self).__init__()
+        self._empty_callback_f = empty_callback_f
+
+    async def __anext__(self):
+        if self._q.empty():
+            await self._empty_callback_f()
+        return await super(_active_forked_aiter, self).__anext__()
 
 
 class aiter_forker:
@@ -224,24 +231,35 @@ class aiter_forker:
     A task is created to drain the original aiter. A consequence of
     this is that you may need to rate limit it using other means.
     """
-    def __init__(self, aiter):
-        self._outputs = weakref.WeakSet()
-        self._task = asyncio.ensure_future(self._worker(aiter))
 
-    def new_fork(self, q=None, maxsize=0):
-        aiter = q_aiter(q=q, maxsize=maxsize)
+    def __init__(self, aiter):
+        self._open_aiter = aiter.__aiter__()
+        self._outputs = weakref.WeakSet()
+        self._main = self.new_fork(is_active=True)
+
+    async def _fetch_next(self):
+        try:
+            _ = await self._open_aiter.__anext__()
+        except StopAsyncIteration:
+            for output in list(self._outputs):
+                output.stop()
+            return
+        for output in list(self._outputs):
+            output.push_nowait(_)
+
+    def new_fork(self, q=None, maxsize=0, is_active=False):
+        if is_active:
+            aiter = _active_forked_aiter(self._fetch_next)
+        else:
+            aiter = q_aiter(q=q, maxsize=maxsize)
         self._outputs.add(aiter)
         return aiter
 
     def remove_fork(self, aiter):
         self._outputs.discard(aiter)
 
-    async def _worker(self, aiter):
-        async for _ in aiter:
-            for output in list(self._outputs):
-                output.push_nowait(_)
-        for output in list(self._outputs):
-            output.stop()
+    def __aiter__(self):
+        return self._main.__aiter__()
 
 
 def rated_aiter(rate_limiter, aiter):
