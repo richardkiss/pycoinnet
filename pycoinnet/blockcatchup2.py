@@ -3,8 +3,8 @@ import logging
 import weakref
 
 from pycoinnet.aitertools import (
-    aiter_forker, iter_to_aiter, map_filter_aiter, flatten_aiter,
-    push_aiter, map_aiter, parallel_map_aiter, join_aiters, rated_aiter
+    aiter_forker, iter_to_aiter, map_filter_aiter,
+    push_aiter, map_aiter, join_aiters, rated_aiter
 )
 
 from pycoin.message.InvItem import InvItem, ITEM_TYPE_BLOCK, ITEM_TYPE_MERKLEBLOCK
@@ -55,10 +55,10 @@ class PeerManager:
     def new_peer_aiter(self, is_active=True):
         return join_aiters(iter_to_aiter([iter_to_aiter(
             list([_ for _ in self._active_peers if not _.is_closing()])),
-            self._peer_aiter_forker.new_fork(is_active=is_active)]))
+            self._peer_aiter_forker.fork(is_active=is_active)]))
 
     def new_event_aiter(self, is_active=True):
-        return self._event_aiter_forker.new_fork(is_active=is_active)
+        return self._event_aiter_forker.fork(is_active=is_active)
 
 
 def init_logging(level=logging.NOTSET, asyncio_debug=False):

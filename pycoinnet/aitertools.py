@@ -3,6 +3,22 @@ import logging
 import weakref
 
 
+async def azip(*aiters):
+    """
+    async version of zip
+    example:
+        async for a, b, c in azip(aiter1, aiter2, aiter3):
+            print(a, b, c)
+    """
+    anext_list = [_.__aiter__() for _ in aiters]
+    while True:
+        try:
+            next_list = [await _.__anext__() for _ in anext_list]
+        except StopAsyncIteration:
+            break
+        yield tuple(next_list)
+
+
 async def iter_to_aiter(iter):
     """
     This converts a regular iterator to an async iterator
@@ -25,49 +41,6 @@ def aiter_to_iter(aiter, loop=None):
             yield _
         except StopAsyncIteration:
             break
-
-
-class linked_aiter:
-    """
-    This is a base class that's not too useful by itself.
-
-    Subclasses of this can be shared by multiple consumers.
-
-    If you want a consumer to have a copy of the aiter, ie. access to each new element,
-    use "new_fork".
-    """
-    def __init__(self, tail=None, next_callback_f=None):
-        self._tail = tail or asyncio.Future()
-        self._lock = asyncio.Semaphore()
-        self._next_callback_f = next_callback_f
-        if self._next_callback_f and not self._tail.done():
-            self._next_task = asyncio.ensure_future(self._next_callback_f(self._tail))
-
-    def new_fork(self, is_active=True):
-        """
-        Make a copy of the iterator. If "is_active" is False, we
-        will never call the "empty_callback_f", so it will be a purely
-        passive, observing copy, like listening in on a wire without affecting it.
-        """
-        next_callback_f = self._next_callback_f if is_active else None
-        return linked_aiter(self._tail, next_callback_f)
-
-    def __aiter__(self):
-        return self
-
-    async def __anext__(self):
-        async with self._lock:
-            try:
-                _, self._tail = await self._tail
-                if self._next_callback_f and not self._tail.done() and self._next_task.done():
-                    self._next_task = asyncio.ensure_future(self._next_callback_f(self._tail))
-                return _
-            except asyncio.CancelledError:
-                raise StopAsyncIteration
-
-
-async def nop(_head, _tail):
-    pass
 
 
 class push_aiter_head:
@@ -118,7 +91,7 @@ class push_aiter:
     def __aiter__(self):
         return self
 
-    def split(self, is_active=True):
+    def fork(self, is_active=True):
         next_preflight = self._next_preflight if is_active else None
         return self.__class__(tail=self._tail, next_preflight=next_preflight)
 
@@ -155,9 +128,9 @@ class push_aiter:
         return count
 
 
-def wrap_aiter(aiter):
+def aiter_forker(aiter):
     """
-    Wrap an iterator with push_aiter. This can be split.
+    Wrap an iterator with push_aiter. This can also be forked.
     """
 
     open_aiter = aiter.__aiter__()
@@ -179,77 +152,6 @@ def wrap_aiter(aiter):
     pa = push_aiter(next_preflight=make_kick())
     pa.head().task = asyncio.ensure_future(worker(open_aiter, pa))
     return pa
-
-
-def q_aiter(q=None, maxsize=1):
-    if q is None:
-        q = asyncio.Queue(maxsize=maxsize)
-
-    async def worker(q, pa):
-        try:
-            _ = await q.get()
-            await pa.push(_)
-        except StopAsyncIteration:
-            pa.stop()
-
-    def make_kick():
-        def kick(pa):
-            if pa.head().task and not pa.head().task.done():
-                return
-            pa.head().task = asyncio.ensure_future(worker(q, pa))
-        return kick
-
-    pa = push_aiter(next_preflight=make_kick())
-    pa.head().task = asyncio.ensure_future(worker(q, pa))
-    return pa
-
-
-
-'''class discrete_aiter(push_aiter):
-    """
-    Wrap an iterator, pulling elements through using "allow_elements_through".
-    """
-    def __init__(self, aiter, *args, **kwargs):
-        super(discrete_aiter, self).__init__(*args, **kwargs)
-        self._rate_iterator = push_aiter()
-        self._task = asyncio.ensure_future(self._worker(aiter))
-
-    async def _worker(self, aiter):
-        async for item, _ in azip(aiter, self._rate_iterator):
-            self.push(item)
-
-    def allow_elements_through(self, n):
-        if n is None:
-            self._rate_iterator.stop()
-        else:
-            _rate_iterator.push([0] * n)
-
-
-class aiter_forker(discrete_aiter):
-    def __init__(self, *args, prefill_size=1, **kwargs):
-        super(wrap_aiter, self).__init__(*args, **kwargs)
-        self.allow_elements_through(prefill_size)
-
-    def _preflight(self):
-        self.allow_elements_through(1)
-
-    async def __anext__(self):
-        try:
-            _, self._tail = await self._tail
-            return _
-        except asyncio.CancelledError:
-            raise StopAsyncIteration
-
-    def split(self, is_active=True):
-        """
-        Make a passive, observing copy of the iterator, like listening
-        in on a wire without affecting it.
-        """
-        if is_active:
-            return aiter_of_aiters()
-        else:
-            return pop_aiter(self._tail)
-'''
 
 
 async def join_aiters(aiter_of_aiters):
@@ -296,14 +198,14 @@ async def map_aiter(map_f, aiter):
     to everything coming out of the iterator before passing it on.
     """
     if asyncio.iscoroutinefunction(map_f):
-        new_map_f = map_f
+        _map_f = map_f
     else:
-        async def new_map_f(_):
+        async def _map_f(_):
             return map_f(_)
 
     async for _ in aiter:
         try:
-            yield await new_map_f(_)
+            yield await _map_f(_)
         except Exception:
             logging.exception("unhandled mapping function %s worker exception on %s", map_f, _)
 
@@ -328,14 +230,14 @@ async def map_filter_aiter(map_f, aiter):
     Empty lists are okay.
     """
     if asyncio.iscoroutinefunction(map_f):
-        new_map_f = map_f
+        _map_f = map_f
     else:
-        async def new_map_f(_):
+        async def _map_f(_):
             return map_f(_)
 
     async for _ in aiter:
         try:
-            items = await new_map_f(_)
+            items = await _map_f(_)
             for _ in items:
                 yield _
         except Exception:
@@ -343,34 +245,9 @@ async def map_filter_aiter(map_f, aiter):
 
 
 def parallel_map_aiter(map_f, worker_count, aiter, q=None, maxsize=1):
-    shared_aiter = wrap_aiter(aiter)
+    shared_aiter = aiter_forker(aiter)
     aiters = [map_aiter(map_f, shared_aiter) for _ in range(worker_count)]
     return join_aiters(iter_to_aiter(aiters))
-
-
-def aiter_forker_old(aiter):
-
-    opened_aiter = aiter.__aiter__()
-
-    async def get_next(the_future):
-        try:
-            _ = await opened_aiter.__anext__()
-        except StopAsyncIteration:
-            while the_future.done():
-                prior, the_future = await the_future
-            the_future.cancel()
-        else:
-            while the_future.done():
-                prior, the_future = await the_future
-            the_future.set_result((_, asyncio.Future()))
-
-    new_aiter = linked_aiter(next_callback_f=get_next)
-    new_aiter.new_fork = new_aiter.split
-    new_aiter.remove_fork = lambda *args, **kwargs: 0
-    return new_aiter
-
-aiter_forker = wrap_aiter
-push_aiter.new_fork = push_aiter.split
 
 
 def rated_aiter(rate_limiter, aiter):
@@ -382,19 +259,3 @@ def rated_aiter(rate_limiter, aiter):
     """
     r_aiter = map_aiter(lambda x: x[0], azip(aiter, map_filter_aiter(range, rate_limiter)))
     return r_aiter
-
-
-async def azip(*aiters):
-    """
-    async version of zip
-    example:
-        async for a, b, c in azip(aiter1, aiter2, aiter3):
-            print(a, b, c)
-    """
-    anext_list = [_.__aiter__() for _ in aiters]
-    while True:
-        try:
-            next_list = [await _.__anext__() for _ in anext_list]
-        except StopAsyncIteration:
-            break
-        yield tuple(next_list)
