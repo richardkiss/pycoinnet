@@ -212,12 +212,12 @@ def parallel_map_aiter(map_f, worker_count, aiter, q=None, maxsize=1):
 
 
 class _active_forked_aiter(q_aiter):
-    def __init__(self, empty_callback_f):
-        super(_active_forked_aiter, self).__init__()
+    def __init__(self, empty_callback_f, q=None, maxsize=0):
+        super(_active_forked_aiter, self).__init__(q=q, maxsize=maxsize)
         self._empty_callback_f = empty_callback_f
 
     async def __anext__(self):
-        if self._q.empty():
+        while self._q.empty() and not self._stopping.done():
             await self._empty_callback_f()
         return await super(_active_forked_aiter, self).__anext__()
 
@@ -225,31 +225,35 @@ class _active_forked_aiter(q_aiter):
 class aiter_forker:
     """
     This class wraps an aiter and allows forks. Each fork gets
-    an identical copy of elements of aiter. If there are no forks, the
-    elements are dropped.
+    an identical copy of elements of aiter.
 
-    A task is created to drain the original aiter. A consequence of
-    this is that you may need to rate limit it using other means.
+    There are two kinds of forks: active and passive. Passive forks never
+    query the original aiter, but instead, wait for an active fork to query it.
+    It's like to "listening in" on a wire without affecting its flow.
     """
 
     def __init__(self, aiter):
         self._open_aiter = aiter.__aiter__()
         self._outputs = weakref.WeakSet()
-        self._main = self.new_fork(is_active=True)
+        self._is_fetching = asyncio.Semaphore()
 
     async def _fetch_next(self):
-        try:
-            _ = await self._open_aiter.__anext__()
-        except StopAsyncIteration:
+        if self._is_fetching.locked():
+            async with self._is_fetching:
+                return
+        async with self._is_fetching:
+            try:
+                _ = await self._open_aiter.__anext__()
+            except StopAsyncIteration:
+                for output in list(self._outputs):
+                    output.stop()
+                return
             for output in list(self._outputs):
-                output.stop()
-            return
-        for output in list(self._outputs):
-            output.push_nowait(_)
+                output.push_nowait(_)
 
     def new_fork(self, q=None, maxsize=0, is_active=False):
         if is_active:
-            aiter = _active_forked_aiter(self._fetch_next)
+            aiter = _active_forked_aiter(self._fetch_next, q=q, maxsize=maxsize)
         else:
             aiter = q_aiter(q=q, maxsize=maxsize)
         self._outputs.add(aiter)
@@ -257,9 +261,6 @@ class aiter_forker:
 
     def remove_fork(self, aiter):
         self._outputs.discard(aiter)
-
-    def __aiter__(self):
-        return self._main.__aiter__()
 
 
 def rated_aiter(rate_limiter, aiter):
