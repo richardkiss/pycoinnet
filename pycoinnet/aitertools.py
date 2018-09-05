@@ -27,6 +27,61 @@ def aiter_to_iter(aiter, loop=None):
             break
 
 
+class linked_aiter:
+    """
+    This can be shared by multiple consumers.
+    """
+    def __init__(self, tail=None, next_callback_f=None):
+        self._tail = tail or asyncio.Future()
+        self._lock = asyncio.Semaphore()
+        self._next_callback_f = next_callback_f
+
+    def split(self, is_active=True):
+        """
+        Make a copy of the iterator. If "is_active" is False, we
+        will never call the "empty_callback_f", so it will be a purely
+        passive, observing copy, like listening in on a wire without affecting it.
+        """
+        next_callback_f = self._next_callback_f if is_active else None
+        return linked_aiter(self.tail, next_callback_f)
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        async with self._lock:
+            try:
+                _, self._tail = await self._tail
+                if self._next_callback_f and not self._tail.done():
+                    self._next_task = asyncio.ensure_future(self._next_callback_f(self._tail))
+                return _
+            except asyncio.CancelledError:
+                raise StopAsyncIteration
+
+
+class push_aiter(linked_aiter):
+    """
+    This is a linked_aiter that allows pushing of elements.
+    """
+    def __init__(self, advance_callback_f=None):
+        super(push_aiter, self).__init__(asyncio.Future())
+        self._head = self._tail
+
+    async def push(self, item):
+        self.push_nowait(item)
+
+    def push_nowait(self, item):
+        if self._head.cancelled():
+            raise ValueError("%s closed" % self)
+        new_head = asyncio.Future()
+        self._head.set_result((item, new_head))
+        self._head = new_head
+
+    def stop(self):
+        if not self._head.done():
+            self._head.cancel()
+
+
 class q_aiter:
     """
     Creates an async iterator that you can "push" items into.

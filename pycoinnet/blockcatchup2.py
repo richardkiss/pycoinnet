@@ -3,8 +3,8 @@ import logging
 import weakref
 
 from pycoinnet.aitertools import (
-    aiter_forker, iter_to_aiter, map_filter_aiter, flatten_aiter,
-    q_aiter, map_aiter, parallel_map_aiter, join_aiters, rated_aiter
+    aiter_forker, iter_to_aiter, map_filter_aiter, flatten_aiter, q_aiter,
+    push_aiter, map_aiter, parallel_map_aiter, join_aiters, rated_aiter
 )
 
 from pycoin.message.InvItem import InvItem, ITEM_TYPE_BLOCK, ITEM_TYPE_MERKLEBLOCK
@@ -88,16 +88,16 @@ async def lifecycle_peer(limiting_remote_host_aiter, rate_limiter, desired_host_
 async def collect_blocks(network):
     blockchain_view = BlockChainView.from_json(BCV_JSON)
 
-    host_port_q_aiter = q_aiter()
+    host_port_q_aiter = push_aiter()
     host_port_q_aiter.stop()
     host_port_q_aiter = iter_to_aiter([("192.168.1.99", 8333)])
 
     dns_aiter = dns_bootstrap_host_port_aiter(network)
-    dns_aiter = iter_to_aiter([])
+    #dns_aiter = iter_to_aiter([])
 
     remote_host_aiter = join_aiters(iter_to_aiter([dns_aiter, host_port_q_aiter]))
 
-    rate_limiter = q_aiter()
+    rate_limiter = push_aiter()
     limiting_remote_host_aiter = rated_aiter(rate_limiter, remote_host_aiter)
 
     remote_host_aiter = make_remote_host_aiter(
