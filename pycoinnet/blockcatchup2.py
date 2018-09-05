@@ -112,7 +112,7 @@ async def collect_blocks(network):
     await peer_manager.close_all()
 
 
-async def headers_info_aiter(peer_manager, blockchain_view, peer_count):
+async def headers_info_aiter(peer_manager, blockchain_view, block_batcher, peer_count):
     """
     yields pairs of (block_header, block_index)
 
@@ -141,8 +141,8 @@ async def headers_info_aiter(peer_manager, blockchain_view, peer_count):
                 # this hack is necessary because the stupid default client
                 # does not send the genesis block!
                 bh = headers[0].previous_block_hash
-                f = await inv_batcher.inv_item_to_future(InvItem(ITEM_TYPE_BLOCK, bh))
-                block = await f
+                f = await block_batcher._add_to_download_queue(bh, 0)
+                peer, block = await f
                 headers = [block] + headers
 
             block_number = blockchain_view.do_headers_improve_path(headers)
@@ -169,20 +169,19 @@ async def headers_info_aiter(peer_manager, blockchain_view, peer_count):
 async def blockcatchup(peer_manager, blockchain_view, peer_count, filter_f=None):
     filter_f = filter_f or (lambda block_hash, index: ITEM_TYPE_BLOCK)
 
-    hi_aiter = headers_info_aiter(peer_manager, blockchain_view, 3)
+    block_batcher = BlockBatcher(peer_manager)
 
-    block_batcher = BlockBatcher(peer_manager, hi_aiter)
+    hi_aiter = headers_info_aiter(peer_manager, blockchain_view, block_batcher, 3)
 
-    async for idx, f in block_batcher:
+    async for idx, f in block_batcher.block_futures_for_header_info_aiter(hi_aiter):
         peer, block = await f
         yield peer, block, idx
 
 
 class BlockBatcher:
-    def __init__(self, peer_manager, header_info_aiter):
+    def __init__(self, peer_manager):
         self._inv_item_future_queue = asyncio.PriorityQueue()
         self._block_hash_to_future = weakref.WeakValueDictionary()
-        self._header_info_aiter = header_info_aiter
         self._peer_aiter = peer_manager.new_peer_aiter()
         self._event_aiter = peer_manager.new_event_aiter()
         self._peer_task = asyncio.ensure_future(self._peer_worker())
@@ -193,18 +192,17 @@ class BlockBatcher:
         results = []
         for _, block_header in enumerate(block_headers):
             block_index = first_block_index + _
-            results.append((block_index, await self._add_to_download_queue(block_header, block_index)))
+            results.append((block_index, await self._add_to_download_queue(block_header.hash(), block_index)))
         return results
 
-    async def __aiter__(self):
-        async for _ in map_filter_aiter(self._header_info_aiter_to_block_batcher_aiter, self._header_info_aiter):
+    async def block_futures_for_header_info_aiter(self, header_info_aiter):
+        async for _ in map_filter_aiter(self._header_info_aiter_to_block_batcher_aiter, header_info_aiter):
             yield _
         self._event_task.cancel()
         await self._peer_task
         #await self._event_task
 
-    async def _add_to_download_queue(self, block_header, block_index):
-        block_hash = block_header.hash()
+    async def _add_to_download_queue(self, block_hash, block_index):
         f = self._block_hash_to_future.get(block_hash)
         if not f:
             f = asyncio.Future()
