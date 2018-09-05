@@ -2,8 +2,8 @@ import asyncio
 import unittest
 
 from pycoinnet.aitertools import (
-    azip, aiter_forker, flatten_aiter, iter_to_aiter,
-    q_aiter, map_aiter, parallel_map_aiter, join_aiters, rated_aiter
+    azip, aiter_forker, flatten_aiter, iter_to_aiter, push_aiter,
+    map_aiter, parallel_map_aiter, join_aiters, rated_aiter
 )
 
 
@@ -32,7 +32,7 @@ async def get_n(aiter, n=0):
 
 class test_aitertools(unittest.TestCase):
 
-    def test_q_aiter(self):
+    def test_push_aiter(self):
 
         async def go(q, results):
             await q.push(5)
@@ -43,7 +43,7 @@ class test_aitertools(unittest.TestCase):
             async for _ in q:
                 results.append(_)
 
-        q = q_aiter(maxsize=0)
+        q = push_aiter()
         results = []
         run(go(q, results))
         self.assertEqual(results, [5, 4, 3])
@@ -63,7 +63,7 @@ class test_aitertools(unittest.TestCase):
             q.stop()
 
         results = []
-        q = q_aiter(maxsize=0)
+        q = push_aiter()
         aiter = map_aiter(make_async_transformation_f(results), q)
         run(go(q))
         self.assertEqual(results, [])
@@ -73,7 +73,7 @@ class test_aitertools(unittest.TestCase):
 
     def test_flatten_aiter(self):
         async def go():
-            q = q_aiter(maxsize=0)
+            q = push_aiter()
             fi = flatten_aiter(q)
             r = []
             await q.push([0, 1, 2, 3])
@@ -90,11 +90,11 @@ class test_aitertools(unittest.TestCase):
 
     def test_make_pipe(self):
         async def map_f(x):
-            await asyncio.sleep(x / 10.0)
+            await asyncio.sleep(x / 100.0)
             return x * x
 
         async def go():
-            q = q_aiter(maxsize=0)
+            q = push_aiter()
             aiter = map_aiter(map_f, q)
             for _ in range(4):
                 await q.push(_)
@@ -112,7 +112,7 @@ class test_aitertools(unittest.TestCase):
     def test_make_simple_pipeline(self):
 
         async def go():
-            q = q_aiter(maxsize=0)
+            q = push_aiter()
             aiter = flatten_aiter(flatten_aiter(q))
             await q.push([
                 (0, 0, 1, 0),
@@ -167,7 +167,7 @@ class test_aitertools(unittest.TestCase):
         ]
 
         async def go(case):
-            q = q_aiter(maxsize=0)
+            q = push_aiter()
             aiter = parallel_map_aiter(make_wait_index(0), 10,
                         parallel_map_aiter(make_wait_index(1), 10,
                             parallel_map_aiter(make_wait_index(2), 10,
@@ -200,7 +200,7 @@ class test_aitertools(unittest.TestCase):
         ]
 
         async def go(case):
-            q = q_aiter(maxsize=0)
+            q = push_aiter()
             aiter = flatten_aiter(map_aiter(filter, q))
             await q.push(case)
             r = await get_n(aiter, 12)
@@ -213,7 +213,7 @@ class test_aitertools(unittest.TestCase):
     def test_aiter_forker(self):
 
         async def go():
-            q = q_aiter(maxsize=0)
+            q = push_aiter()
             forker = aiter_forker(q)
             await q.push(1, 2, 3, 4, 5)
             r0 = await get_n(forker, 3)
@@ -235,7 +235,7 @@ class test_aitertools(unittest.TestCase):
         """
 
         async def go():
-            q = q_aiter(maxsize=0)
+            q = push_aiter()
             forker = aiter_forker(q)
             fork_1 = forker.new_fork(is_active=True)
             fork_2 = forker.new_fork(is_active=True)
@@ -269,7 +269,7 @@ class test_aitertools(unittest.TestCase):
     def test_rated_aiter(self):
         i1 = list(range(30))
         ai = iter_to_aiter(i1)
-        rate_limiter = q_aiter()
+        rate_limiter = push_aiter()
         aiter = rated_aiter(rate_limiter, ai)
         rate_limiter.push_nowait(9)
         r = run(get_n(aiter, 3))
