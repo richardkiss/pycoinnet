@@ -3,7 +3,7 @@ import logging
 import weakref
 
 from pycoinnet.aitertools import (
-    aiter_forker, iter_to_aiter, map_filter_aiter, flatten_aiter, q_aiter,
+    aiter_forker, iter_to_aiter, map_filter_aiter, flatten_aiter,
     push_aiter, map_aiter, parallel_map_aiter, join_aiters, rated_aiter
 )
 
@@ -181,7 +181,6 @@ async def blockcatchup(peer_manager, blockchain_view, peer_count, filter_f=None)
 class BlockBatcher:
     def __init__(self, peer_manager, header_info_aiter):
         self._inv_item_future_queue = asyncio.PriorityQueue()
-        self._inv_item_future_aiter = q_aiter(self._inv_item_future_queue)
         self._block_hash_to_future = weakref.WeakValueDictionary()
         self._header_info_aiter = header_info_aiter
         self._peer_aiter = peer_manager.new_peer_aiter()
@@ -200,7 +199,6 @@ class BlockBatcher:
     async def __aiter__(self):
         async for _ in map_filter_aiter(self._header_info_aiter_to_block_batcher_aiter, self._header_info_aiter):
             yield _
-        self._inv_item_future_aiter.stop()
         self._event_task.cancel()
         await self._peer_task
         #await self._event_task
@@ -212,7 +210,7 @@ class BlockBatcher:
             f = asyncio.Future()
             self._block_hash_to_future[block_hash] = f
             item = (block_index, block_hash, f, set())
-            await self._inv_item_future_aiter.push(item)
+            await self._inv_item_future_queue.put(item)
         return f
 
     async def _peer_worker(self):
@@ -226,7 +224,10 @@ class BlockBatcher:
         batch = []
         skipped = []
 
-        async for item in self._inv_item_future_aiter:
+        while True:
+            if len(batch) > 0 and self._inv_item_future_queue.empty():
+                break
+            item = await self._inv_item_future_queue.get()
             (priority, block_hash, f, peers_tried) = item
             if f.done():
                 continue
@@ -243,7 +244,7 @@ class BlockBatcher:
                           peer, batch[0][0], len(batch), desired_batch_size)
 
         for item in skipped:
-            await self._inv_item_future_aiter.push(item)
+            await self._inv_item_future_queue.put(item)
 
         return batch
 
@@ -273,6 +274,10 @@ class BlockBatcher:
                 int(desired_batch_size * 1.5) + 1,
                 int(target_batch_time * item_per_unit_time + 0.5))
             desired_batch_size = min(max(1, desired_batch_size), max_batch_size)
+            got_all = all(_.result()[0] == peer for _ in done)
+            if not got_all:
+                logging.info("peer %s didn't respond to all requests, sleeping for 60 s", peer)
+                loop.sleep(60)
             logging.debug("new batch size for %s is %d", peer, desired_batch_size)
 
     def _timeout_batch(self, batch):
