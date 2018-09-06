@@ -2,24 +2,23 @@ import asyncio
 import logging
 
 from pycoinnet.aitertools import iter_to_aiter, parallel_map_aiter, flatten_aiter
-from pycoinnet.dnsbootstrap import dns_bootstrap_host_port_iterator
+from pycoinnet.dnsbootstrap import dns_bootstrap_host_port_aiter
 from pycoinnet.Peer import Peer
 from pycoinnet.version import version_data_for_peer
 
 
-def connected_peer_iterator(network, tcp_connect_workers=30, handshake_workers=3,
-                            host_aiter=None, version_dict={}):
+async def host_port_to_reader_writer(host_port_pair):
+    host, port = host_port_pair
+    logging.debug("TCP connecting to %s:%d", host, port)
+    try:
+        reader, writer = await asyncio.open_connection(host=host, port=port)
+        logging.debug("TCP connected to %s:%d", host, port)
+        return [(reader, writer)]
+    except Exception as ex:
+        logging.info("connect failed: %s:%d (%s)", host, port, ex)
 
-    async def host_port_to_reader_writer(host_port_pair):
-        host, port = host_port_pair
-        logging.debug("TCP connecting to %s:%d", host, port)
-        try:
-            reader, writer = await asyncio.open_connection(host=host, port=port)
-            logging.debug("TCP connected to %s:%d", host, port)
-            return [(reader, writer)]
-        except Exception as ex:
-            logging.info("connect failed: %s:%d (%s)", host, port, ex)
 
+def make_peer_handshake_map_filter(network, version_dict):
     async def peer_handshake(reader_writer):
         reader, writer = reader_writer
         peer = Peer(
@@ -32,13 +31,26 @@ def connected_peer_iterator(network, tcp_connect_workers=30, handshake_workers=3
             peer.close()
         else:
             return [peer]
+    return peer_handshake
 
-    aiter = flatten_aiter(
-        parallel_map_aiter(peer_handshake, handshake_workers, flatten_aiter(
-            parallel_map_aiter(
-                host_port_to_reader_writer, tcp_connect_workers, host_aiter))))
 
-    return aiter
+def make_remote_host_aiter(
+    network, host_aiter, tcp_connect_workers=30, handshake_workers=3, version_dict={}):
+    """
+    host_aiter: async iter of (host, port) values
+    connected_host_aiter: async iter of (reader, writer) values
+    handshaked_peer_aiter: async iter of Peer objects, post handshake
+    """
+
+    peer_handshake_map_filter = make_peer_handshake_map_filter(network, version_dict)
+
+    connected_host_aiter = flatten_aiter(parallel_map_aiter(
+        host_port_to_reader_writer, tcp_connect_workers, host_aiter))
+
+    handshaked_peer_aiter = flatten_aiter(
+        parallel_map_aiter(peer_handshake_map_filter, handshake_workers, connected_host_aiter))
+
+    return handshaked_peer_aiter
 
 
 def peer_address_to_hostport(peer_address, default_port):
@@ -53,13 +65,13 @@ def peer_addresses_to_host_aiter(network, peer_addresses=[]):
     if peer_addresses:
         hostports = [peer_address_to_hostport(_, network.default_port) for _ in peer_addresses]
         return iter_to_aiter(hostports)
-    return dns_bootstrap_host_port_iterator(network)
+    return dns_bootstrap_host_port_aiter(network)
 
 
 def get_peer_iterator(network, peer_addresses=[]):
     # BRAIN DAMAGE: 70016 version number is required for bgold new block header format
     host_aiter = peer_addresses_to_host_aiter(network, peer_addresses)
-    return connected_peer_iterator(network, host_aiter=host_aiter, version_dict=dict(version=70016))
+    return make_remote_host_aiter(network, host_aiter, version_dict=dict(version=70016))
 
 
 # events
