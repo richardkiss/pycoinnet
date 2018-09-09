@@ -10,13 +10,13 @@ async def azip(*aiters):
         async for a, b, c in azip(aiter1, aiter2, aiter3):
             print(a, b, c)
     """
-    anext_list = [_.__aiter__() for _ in aiters]
+    anext_tuple = tuple([_.__aiter__() for _ in aiters])
     while True:
         try:
-            next_list = [await _.__anext__() for _ in anext_list]
+            next_tuple = tuple([await _.__anext__() for _ in anext_tuple])
         except StopAsyncIteration:
             break
-        yield tuple(next_list)
+        yield next_tuple
 
 
 async def iter_to_aiter(iter):
@@ -79,10 +79,7 @@ class push_aiter:
     def head(self):
         return self._tail.push_aiter_head
 
-    async def push(self, *items):
-        return self._tail.push_aiter_head.push(*items)
-
-    def push_nowait(self, *items):
+    def push(self, *items):
         return self._tail.push_aiter_head.push(*items)
 
     def stop(self):
@@ -105,6 +102,15 @@ class push_aiter:
             except asyncio.CancelledError:
                 raise StopAsyncIteration
 
+    def available_iter(self):
+        tail = self._tail
+        try:
+            while tail.done():
+                _, tail = tail.result()
+                yield _
+        except asyncio.CancelledError:
+            pass
+
     def is_stopped(self):
         return self._tail.cancelled()
 
@@ -112,20 +118,13 @@ class push_aiter:
         return self.is_len_at_least(1)
 
     def is_len_at_least(self, n):
-        tail = self._tail
-        while n > 0 and tail.done() and not tail.cancelled():
-            _, tail = tail.result()
-            n -= 1
-        return n <= 0
+        for _, item in enumerate(self.available_iter()):
+            if _+1 >= n:
+                return True
+        return False
 
     def __len__(self):
-        breakpoint()
-        count = 0
-        tail = self._tail
-        while tail.done() and not tail.cancelled():
-            _, tail = head.result()
-            count += 1
-        return count
+        return sum(1 for _ in self.available_iter())
 
 
 def aiter_forker(aiter):
@@ -138,7 +137,7 @@ def aiter_forker(aiter):
     async def worker(open_aiter, pa):
         try:
             _ = await open_aiter.__anext__()
-            await pa.push(_)
+            pa.push(_)
         except StopAsyncIteration:
             pa.stop()
 
@@ -250,12 +249,46 @@ def parallel_map_aiter(map_f, worker_count, aiter, q=None, maxsize=1):
     return join_aiters(iter_to_aiter(aiters))
 
 
-def rated_aiter(rate_limiter, aiter):
+async def active_aiter(aiter):
+    """
+    Wrap an aiter with an active puller that yanks out the items
+    and puts them into a push_q.
+    """
+    q = push_aiter()
+    async def _pull_task(aiter):
+        async for _ in aiter:
+            q.push(_)
+        q.stop()
+
+    task = asyncio.ensure_future(_pull_task(aiter))
+
+    async for _ in q:
+        yield _
+    await task
+
+
+def gated_aiter(aiter):
     """
     Returns a pair: an iter along with a function that you can "push"
-    integer values into.
+    integer values into. When a number is pushed, that many items are
+    allowed out through the gate.
 
     This is kind of like an electronic transistor, except discrete.
     """
-    r_aiter = map_aiter(lambda x: x[0], azip(aiter, map_filter_aiter(range, rate_limiter)))
-    return r_aiter
+    gate_aiter = push_aiter()
+    return active_aiter(map_aiter(lambda x: x[0], azip(aiter, map_filter_aiter(range, gate_aiter)))), gate_aiter
+
+
+async def preload_aiter(preload_size, aiter):
+    """
+    This aiter wraps around another aiter, and forces a preloaded
+    buffer of the given size.
+    """
+
+    output_aiter, gate = gated_aiter(aiter)
+
+    gate.push(preload_size)
+    async for _ in output_aiter:
+        yield _
+        gate.push(1)
+    gate.stop()

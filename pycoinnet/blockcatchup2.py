@@ -3,7 +3,7 @@ import logging
 
 from pycoinnet.aitertools import (
     aiter_forker, iter_to_aiter,
-    push_aiter, map_aiter, join_aiters, rated_aiter
+    push_aiter, map_aiter, join_aiters, gated_aiter, preload_aiter
 )
 
 from pycoinnet.BlockChainView import BlockChainView
@@ -61,7 +61,7 @@ class PeerManager:
 
     def new_peer_aiter(self, is_active=True):
         return join_aiters(iter_to_aiter([iter_to_aiter(
-            list([_ for _ in self._active_peers if not _.is_closing()])),
+            [_ for _ in self._active_peers if not _.is_closing()]),
             self._peer_aiter_forker.fork(is_active=is_active)]))
 
     def new_event_aiter(self, is_active=True):
@@ -75,7 +75,7 @@ def init_logging(level=logging.NOTSET, asyncio_debug=False):
 
 
 async def lifecycle_peer(limiting_remote_host_aiter, rate_limiter, desired_host_count):
-    rate_limiter.push_nowait(desired_host_count*3)
+    rate_limiter.push(desired_host_count*3)
     #rate_limiter.stop()
     async for _ in limiting_remote_host_aiter:
         yield _
@@ -94,18 +94,18 @@ async def lifecycle_peer(limiting_remote_host_aiter, rate_limiter, desired_host_
 
 async def collect_blocks(network):
     blockchain_view = BlockChainView.from_json(BCV_JSON)
+    blockchain_view = BlockChainView()
 
     host_port_q_aiter = push_aiter()
     host_port_q_aiter.stop()
-    host_port_q_aiter = iter_to_aiter([("192.168.1.99", 8333)])
+    host_port_q_aiter = iter_to_aiter([("localhost", 8333)])
 
     dns_aiter = dns_bootstrap_host_port_aiter(network)
     #dns_aiter = iter_to_aiter([])
 
     remote_host_aiter = join_aiters(iter_to_aiter([dns_aiter, host_port_q_aiter]))
 
-    rate_limiter = push_aiter()
-    limiting_remote_host_aiter = rated_aiter(rate_limiter, remote_host_aiter)
+    limiting_remote_host_aiter, rate_limiter = gated_aiter(remote_host_aiter)
 
     remote_host_aiter = make_remote_host_aiter(
         network, limiting_remote_host_aiter, version_dict=dict(version=70016))
@@ -117,13 +117,13 @@ async def collect_blocks(network):
     pong_task = create_pong_manager(peer_manager)
 
     async for peer, block, index in blockcatchup(peer_manager, blockchain_view, peer_count=3):
-        print("%6d: %s" % (index, block))
+        print("%6d: %s (%s)" % (index, block.id(), peer))
     await peer_manager.close_all()
 
 
 async def headers_info_aiter(peer_manager, blockchain_view, block_batcher, peer_count):
     """
-    yields pairs of (block_header, block_index)
+    yields pairs of (block_header_list, block_index)
 
     stops when the number of peers who claim to have caught you up is "peer_count"
     """
@@ -170,7 +170,9 @@ async def headers_info_aiter(peer_manager, blockchain_view, block_batcher, peer_
                 hashes.append(headers[idx])
 
             logging.info("got %d new header(s) starting at %d" % (len(hashes), block_number))
-            yield (hashes, block_number)
+            for _, block_header in enumerate(hashes):
+                block_index = block_number + _
+                yield (block_index, block_header)
         if len(caught_up_peers) >= peer_count:
             break
 
@@ -178,9 +180,11 @@ async def headers_info_aiter(peer_manager, blockchain_view, block_batcher, peer_
 async def blockcatchup(peer_manager, blockchain_view, peer_count):
     block_batcher = BlockBatcher(peer_manager)
 
-    hi_aiter = headers_info_aiter(peer_manager, blockchain_view, block_batcher, 3)
+    hi_aiter = preload_aiter(1000, headers_info_aiter(peer_manager, blockchain_view, block_batcher, 3))
+    #async for _ in hi_aiter:
+    #    print(_)
 
-    async for idx, f in block_batcher.block_futures_for_header_info_aiter(hi_aiter):
+    async for idx, f in preload_aiter(1000, block_batcher.block_futures_for_header_info_aiter(hi_aiter)):
         peer, block = await f
         yield peer, block, idx
 
