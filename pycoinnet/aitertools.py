@@ -273,7 +273,7 @@ def gated_aiter(aiter):
     integer values into. When a number is pushed, that many items are
     allowed out through the gate.
 
-    This is kind of like an electronic transistor, except discrete.
+    This is kind of like a discrete version of an electronic transistor.
     """
     gate_aiter = push_aiter()
     return active_aiter(map_aiter(lambda x: x[0], azip(aiter, map_filter_aiter(range, gate_aiter)))), gate_aiter
@@ -292,3 +292,21 @@ async def preload_aiter(preload_size, aiter):
         yield _
         gate.push(1)
     gate.stop()
+
+
+class stoppable_aiter:
+    def __init__(self, aiter):
+        self._open_aiter = aiter.__aiter__()
+        self._is_stopping = False
+
+    def __aiter__(self):
+        return self
+
+    async def __aiter__(self):
+        async for _ in self._open_aiter:
+            yield _
+            if self._is_stopping:
+                break
+
+    def stop(self):
+        self._is_stopping = True
