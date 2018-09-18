@@ -108,12 +108,12 @@ async def collect_blocks(network):
 
     remote_host_aiter = join_aiters(iter_to_aiter([dns_aiter, host_port_q_aiter]))
 
-    limiting_remote_host_aiter, rate_limiter = gated_aiter(remote_host_aiter)
+    limiting_remote_host_aiter = gated_aiter(remote_host_aiter)
 
     remote_host_aiter = make_remote_host_aiter(
         network, limiting_remote_host_aiter, version_dict=dict(version=70016))
 
-    connected_remote_aiter = lifecycle_peer(remote_host_aiter, rate_limiter, 8)
+    connected_remote_aiter = lifecycle_peer(remote_host_aiter, limiting_remote_host_aiter, 8)
 
     peer_manager = PeerManager(connected_remote_aiter)
 
@@ -217,7 +217,7 @@ async def headers_info_aiter(peer_manager, blockchain_view, block_batcher):
                 alt_peer_aiter.stop()
             else:
                 # cancel old best peer
-                alt_peer_gate.stop()
+                alt_peer_aiter.stop()
 
             if len(hashes) > 0:
                 # case 1a: we got an improvement so we now have a best_peer
@@ -227,9 +227,9 @@ async def headers_info_aiter(peer_manager, blockchain_view, block_batcher):
                 aiter_of_aiters.push(peer_aiter_to_triple(iter_to_aiter([best_peer])))
 
                 # set up the alt peer aiter
-                alt_peer_aiter, alt_peer_gate = gated_aiter(make_alt_peer_aiter(peer_manager, peer))
+                alt_peer_aiter = gated_aiter(make_alt_peer_aiter(peer_manager, peer))
                 aiter_of_aiters.push(peer_aiter_to_triple(alt_peer_aiter))
-                alt_peer_gate.push(1)
+                alt_peer_aiter.push(1)
             # case 1b: we didn't get an improvement. Just keep waiting
             continue
 
@@ -240,10 +240,10 @@ async def headers_info_aiter(peer_manager, blockchain_view, block_batcher):
                 # query it again
                 aiter_of_aiters.push(peer_aiter_to_triple(iter_to_aiter([best_peer])))
                 # and get another alt peer
-                alt_peer_gate.push(1)
+                alt_peer_aiter.push(1)
                 continue
             # 2b: we ran out. Try all peers
-            alt_peer_gate.stop()
+            alt_peer_aiter.stop()
             best_peer = None
             alt_peer_aiter = stoppable_aiter(peer_manager.new_peer_aiter())
             aiter_of_aiters.push(peer_aiter_to_triple(alt_peer_aiter))

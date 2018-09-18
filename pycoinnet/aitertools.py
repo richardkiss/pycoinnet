@@ -267,7 +267,7 @@ async def active_aiter(aiter):
     await task
 
 
-def gated_aiter(aiter):
+class gated_aiter:
     """
     Returns a pair: an iter along with a function that you can "push"
     integer values into. When a number is pushed, that many items are
@@ -275,8 +275,19 @@ def gated_aiter(aiter):
 
     This is kind of like a discrete version of an electronic transistor.
     """
-    gate_aiter = push_aiter()
-    return active_aiter(map_aiter(lambda x: x[0], azip(aiter, map_filter_aiter(range, gate_aiter)))), gate_aiter
+    def __init__(self, aiter):
+        self._gate = push_aiter()
+        self._aiter = active_aiter(azip(aiter, map_filter_aiter(range, self._gate)))
+
+    async def __aiter__(self):
+        async for _ in self._aiter:
+            yield _[0]
+
+    def push(self, count):
+        self._gate.push(count)
+
+    def stop(self):
+        self._gate.stop()
 
 
 async def preload_aiter(preload_size, aiter):
@@ -285,10 +296,9 @@ async def preload_aiter(preload_size, aiter):
     buffer of the given size.
     """
 
-    output_aiter, gate = gated_aiter(aiter)
-
+    gate = gated_aiter(aiter)
     gate.push(preload_size)
-    async for _ in output_aiter:
+    async for _ in gate:
         yield _
         gate.push(1)
     gate.stop()

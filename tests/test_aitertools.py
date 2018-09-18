@@ -253,12 +253,12 @@ class test_aitertools(unittest.TestCase):
 
     def test_gated_aiter(self):
         ai = iter_to_aiter(range(3000000000))
-        aiter, rate_limiter = gated_aiter(ai)
-        rate_limiter.push(9)
+        aiter = gated_aiter(ai)
+        aiter.push(9)
         r = run(get_n(aiter, 3))
         r.extend(run(get_n(aiter, 4)))
-        rate_limiter.push(11)
-        rate_limiter.stop()
+        aiter.push(11)
+        aiter.stop()
         r.extend(run(get_n(aiter)))
         self.assertEqual(r, list(range(20)))
 
