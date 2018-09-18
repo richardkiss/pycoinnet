@@ -2,14 +2,16 @@ import asyncio
 import logging
 
 from pycoinnet.aitertools import (
-    aiter_forker, iter_to_aiter, stoppable_aiter,
-    push_aiter, map_aiter, join_aiters, gated_aiter, preload_aiter
+    iter_to_aiter, stoppable_aiter,
+    push_aiter, join_aiters, gated_aiter, preload_aiter
 )
 
 from pycoinnet.BlockChainView import BlockChainView
+from pycoinnet.PeerManager import PeerManager
 
 from pycoinnet.dnsbootstrap import dns_bootstrap_host_port_aiter
 from pycoinnet.peer_pipeline import make_remote_host_aiter
+from pycoinnet.pong_task import create_pong_task
 
 from .BlockBatcher import BlockBatcher
 
@@ -19,56 +21,6 @@ LOG_FORMAT = '%(asctime)s [%(process)d] [%(levelname)s] %(filename)s:%(lineno)d 
 BCV_JSON = '''[
         [0, "000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f", 1],
         [541920, "00000000000000000018e81687fe77a03b0cfd5287ed2a365b9664b98c9d0fbc", 541921]]'''
-
-
-def create_pong_manager(peer_manager):
-
-    async def task():
-        async for peer, name, data in peer_manager.new_event_aiter():
-            if name == "ping":
-                peer.send_msg("pong", nonce=data["nonce"])
-
-    return asyncio.ensure_future(task())
-
-
-def event_aiter_from_peer_aiter(peer_aiter):
-    async def peer_to_events(peer):
-        async def add_peer(event):
-            name, data = event
-            return peer, name, data
-        return map_aiter(add_peer, peer.event_aiter())
-    return join_aiters(map_aiter(peer_to_events, peer_aiter))
-
-
-class PeerManager:
-    def __init__(self, peer_aiter):
-        self._active_peers = set()
-        self._peer_aiter_forker = aiter_forker(peer_aiter)
-        self._event_aiter_forker = aiter_forker(event_aiter_from_peer_aiter(self.new_peer_aiter()))
-        self._watcher_task = asyncio.ensure_future(self._watcher())
-
-    async def _watcher(self):
-        peer_aiter = self.new_peer_aiter(is_active=False)
-        async for peer in peer_aiter:
-            self._active_peers.add(peer)
-        for peer in list(self._active_peers):
-            await peer.wait_until_close()
-
-    async def close_all(self):
-        async for peer in self.new_peer_aiter():
-            peer.close()
-        await self._watcher_task
-
-    def new_peer_aiter(self, is_active=True):
-        return join_aiters(iter_to_aiter([
-            self.active_peers_aiter(),
-            self._peer_aiter_forker.fork(is_active=is_active)]))
-
-    def new_event_aiter(self, is_active=True):
-        return self._event_aiter_forker.fork(is_active=is_active)
-
-    def active_peers_aiter(self):
-        return iter_to_aiter([_ for _ in self._active_peers if not _.is_closing()])
 
 
 def init_logging(level=logging.NOTSET, asyncio_debug=False):
@@ -117,7 +69,7 @@ async def collect_blocks(network):
 
     peer_manager = PeerManager(connected_remote_aiter)
 
-    pong_task = create_pong_manager(peer_manager)
+    pong_task = create_pong_task(peer_manager)
 
     async for peer, block, index in blockcatchup(peer_manager, blockchain_view):
         print("%6d: %s (%s)" % (index, block.id(), peer))
@@ -193,13 +145,12 @@ async def headers_info_aiter(peer_manager, blockchain_view, block_batcher):
                 if _ != peer:
                     yield _
 
-    monitor_improvements_aiter = aiter_forker(
-        monitor_improvements(peer_manager, blockchain_view, block_batcher))
+    monitor_improvements_aiter = monitor_improvements(peer_manager, blockchain_view, block_batcher)
 
     alt_peer_aiter = stoppable_aiter(peer_manager.new_peer_aiter())
     aiter_of_aiters.push(peer_aiter_to_triple(alt_peer_aiter))
 
-    aiter_of_aiters.push(monitor_improvements_aiter.fork())
+    aiter_of_aiters.push(monitor_improvements_aiter)
 
     best_peer = None
 

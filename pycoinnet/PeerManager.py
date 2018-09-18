@@ -1,75 +1,43 @@
 import asyncio
-import logging
+
+from pycoinnet.aitertools import aiter_forker, iter_to_aiter, join_aiters, map_aiter
+
+
+def event_aiter_from_peer_aiter(peer_aiter):
+    async def peer_to_events(peer):
+        async def add_peer(event):
+            name, data = event
+            return peer, name, data
+        return map_aiter(add_peer, peer.event_aiter())
+    return join_aiters(map_aiter(peer_to_events, peer_aiter))
 
 
 class PeerManager:
-    # TODO: handle incoming
-    def __init__(self, peer_aiter, desired_peer_count):
-        self._peer_aiter = peer_aiter
-        self._desired_peer_count = desired_peer_count
-        self._peers = set()
-        self._event_callback_index = 0
-        self._event_callbacks = {}  # BRAIN DAMAGE: weakref.WeakValueDictionary()
-        self._is_running = True
-        self._outgoing_coroutines = [self._maintain_outgoing() for _ in range(desired_peer_count)]
-        self._maintain_task = asyncio.gather(
-            asyncio.gather(*self._outgoing_coroutines), self._maintain_incoming())
+    def __init__(self, peer_aiter):
+        self._active_peers = set()
+        self._peer_aiter_forker = aiter_forker(peer_aiter)
+        self._event_aiter_forker = aiter_forker(event_aiter_from_peer_aiter(self.new_peer_aiter()))
+        self._watcher_task = asyncio.ensure_future(self._watcher())
 
-    def peers(self):
-        return list(self._peers)
+    async def _watcher(self):
+        peer_aiter = self.new_peer_aiter(is_active=False)
+        async for peer in peer_aiter:
+            self._active_peers.add(peer)
+        for peer in list(self._active_peers):
+            await peer.wait_until_close()
 
-    def accept_incoming_peer(self, peer):
-        # TODO: handle incoming
-        pass
-
-    def close_all(self):
-        self._is_running = False
-        for peer in self._peers:
+    async def close_all(self):
+        async for peer in self.new_peer_aiter():
             peer.close()
+        await self._watcher_task
 
-    def __del__(self):
-        self.close_all()
+    def new_peer_aiter(self, is_active=True):
+        return join_aiters(iter_to_aiter([
+            self.active_peers_aiter(),
+            self._peer_aiter_forker.fork(is_active=is_active)]))
 
-    async def _peer_lifecycle(self, peer):
-        self._peers.add(peer)
-        # tell children
-        for callback in list(self._event_callbacks.values()):
-            asyncio.get_event_loop().call_soon(callback, peer, None, None)
-        await self.process_events(peer)
-        peer.close()
-        logging.debug("peer closed %s", peer)
-        self._peers.remove(peer)
+    def new_event_aiter(self, is_active=True):
+        return self._event_aiter_forker.fork(is_active=is_active)
 
-    async def _maintain_outgoing(self):
-        async for peer in self._peer_aiter:
-            if not self._is_running:
-                break
-            await self._peer_lifecycle(peer)
-            logging.debug("acquiring new peer to replace %s", peer)
-
-    async def _maintain_incoming(self):
-        return
-        # TODO: fix this
-        while self._is_running:
-            # we can interrupt here, and that's not good
-            self._peer_lifecycle(peer)
-
-    def add_event_callback(self, callback):
-        self._event_callback_index += 1
-        self._event_callbacks[self._event_callback_index] = callback
-        for peer in list(self._peers):
-            asyncio.get_event_loop().call_soon(callback, peer, None, None)
-        return self._event_callback_index
-
-    def del_event_callback(self, handle):
-        if handle in self._event_callbacks:
-            del self._event_callbacks[handle]
-
-    async def process_events(self, peer):
-        while True:
-            event = await peer.next_message()
-            if event is None:
-                break
-            name, data = event
-            for callback in list(self._event_callbacks.values()):
-                asyncio.get_event_loop().call_soon(callback, peer, name, data)
+    def active_peers_aiter(self):
+        return iter_to_aiter([_ for _ in self._active_peers if not _.is_closing()])
