@@ -39,6 +39,17 @@ async def peer_lifecycle(remote_peer_aiter, rate_limiter):
         rate_limiter.push(1)
 
 
+def peer_manager_for_host_port_aiter(network, remote_host_aiter, count=8):
+
+    handshaked_peer_aiter = sharable_aiter(make_handshaked_peer_aiter(
+        network, remote_host_aiter, version_dict=dict(version=70016)))
+
+    connected_remote_aiter = join_aiters(iter_to_aiter([
+        peer_lifecycle(handshaked_peer_aiter, remote_host_aiter) for _ in range(count)]))
+
+    return PeerManager(connected_remote_aiter)
+
+
 async def collect_blocks(network):
     blockchain_view = BlockChainView.from_json(BCV_JSON)
     blockchain_view = BlockChainView()
@@ -51,17 +62,9 @@ async def collect_blocks(network):
     #dns_aiter = iter_to_aiter([])
 
     dns_aiter = map_aiter(lambda _: _[1], azip(iter_to_aiter(range(10)), dns_aiter))
-    remote_host_aiter = join_aiters(iter_to_aiter([dns_aiter, host_port_q_aiter]))
+    limiting_remote_host_aiter = gated_aiter(join_aiters(iter_to_aiter([dns_aiter, host_port_q_aiter])))
 
-    limiting_remote_host_aiter = gated_aiter(remote_host_aiter)
-
-    handshaked_peer_aiter = sharable_aiter(make_handshaked_peer_aiter(
-        network, limiting_remote_host_aiter, version_dict=dict(version=70016)))
-
-    connected_remote_aiter = join_aiters(iter_to_aiter([
-        peer_lifecycle(handshaked_peer_aiter, limiting_remote_host_aiter) for _ in range(8)]))
-
-    peer_manager = PeerManager(connected_remote_aiter)
+    peer_manager = peer_manager_for_host_port_aiter(network, limiting_remote_host_aiter)
 
     pong_task = create_pong_task(peer_manager)
 
