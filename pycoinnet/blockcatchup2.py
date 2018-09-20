@@ -2,8 +2,7 @@ import asyncio
 import logging
 
 from pycoinnet.aitertools import (
-    iter_to_aiter, stoppable_aiter,
-    push_aiter, join_aiters, gated_aiter, preload_aiter
+    sharable_aiter, iter_to_aiter, push_aiter, join_aiters, gated_aiter, preload_aiter, map_aiter, azip
 )
 
 from pycoinnet.BlockChainView import BlockChainView
@@ -11,7 +10,7 @@ from pycoinnet.PeerManager import PeerManager
 
 from pycoinnet.dnsbootstrap import dns_bootstrap_host_port_aiter
 from pycoinnet.header_improvements import header_improvements_aiter
-from pycoinnet.peer_pipeline import make_remote_host_aiter
+from pycoinnet.peer_pipeline import make_handshaked_peer_aiter
 from pycoinnet.pong_task import create_pong_task
 
 from .BlockBatcher import BlockBatcher
@@ -21,7 +20,7 @@ LOG_FORMAT = '%(asctime)s [%(process)d] [%(levelname)s] %(filename)s:%(lineno)d 
 
 BCV_JSON = '''[
         [0, "000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f", 1],
-        [541920, "00000000000000000018e81687fe77a03b0cfd5287ed2a365b9664b98c9d0fbc", 541921]]'''
+        [542157, "00000000000000000009f163eade1888fc7c51e52a89967129df60bc1a53bc15", 542158]]'''
 
 
 def init_logging(level=logging.NOTSET, asyncio_debug=False):
@@ -30,22 +29,14 @@ def init_logging(level=logging.NOTSET, asyncio_debug=False):
     logging.getLogger("asyncio").setLevel(logging.DEBUG if asyncio_debug else logging.INFO)
 
 
-async def lifecycle_peer(limiting_remote_host_aiter, rate_limiter, desired_host_count):
-    rate_limiter.push(desired_host_count*3)
-    #rate_limiter.stop()
-    async for _ in limiting_remote_host_aiter:
-        yield _
-
-    """
-    peers = set()
-
-    async def ensure_enough():
-        pass
-
-    async for peer in limiting_remote_host_aiter:
-        peers.add()
+async def peer_lifecycle(remote_peer_aiter, rate_limiter):
+    rate_limiter.push(1)
+    async for peer in remote_peer_aiter:
+        logging.info("connected to %s", peer)
         yield peer
-    """
+        await peer.wait_until_close()
+        logging.info("close connection to %s", peer)
+        rate_limiter.push(1)
 
 
 async def collect_blocks(network):
@@ -59,33 +50,48 @@ async def collect_blocks(network):
     dns_aiter = dns_bootstrap_host_port_aiter(network)
     #dns_aiter = iter_to_aiter([])
 
+    dns_aiter = map_aiter(lambda _: _[1], azip(iter_to_aiter(range(10)), dns_aiter))
     remote_host_aiter = join_aiters(iter_to_aiter([dns_aiter, host_port_q_aiter]))
 
     limiting_remote_host_aiter = gated_aiter(remote_host_aiter)
 
-    remote_host_aiter = make_remote_host_aiter(
-        network, limiting_remote_host_aiter, version_dict=dict(version=70016))
+    handshaked_peer_aiter = sharable_aiter(make_handshaked_peer_aiter(
+        network, limiting_remote_host_aiter, version_dict=dict(version=70016)))
 
-    connected_remote_aiter = lifecycle_peer(remote_host_aiter, limiting_remote_host_aiter, 8)
+    connected_remote_aiter = join_aiters(iter_to_aiter([
+        peer_lifecycle(handshaked_peer_aiter, limiting_remote_host_aiter) for _ in range(8)]))
 
     peer_manager = PeerManager(connected_remote_aiter)
 
     pong_task = create_pong_task(peer_manager)
 
-    async for peer, block, index in blockcatchup(peer_manager, blockchain_view):
+    async for peer, block, index in blockcatchup(peer_manager, blockchain_view, limiting_remote_host_aiter):
         print("%6d: %s (%s)" % (index, block.id(), peer))
     await peer_manager.close_all()
     await pong_task
 
 
-async def blockcatchup(peer_manager, blockchain_view):
+async def blockcatchup(peer_manager, blockchain_view, limiting_remote_host_aiter):
+
     block_batcher = BlockBatcher(peer_manager)
 
-    hi_aiter = header_improvements_aiter(peer_manager, blockchain_view, block_batcher)
+    async def header_improvements(peer_manager, blockchain_view, block_batcher, count=4):
+        hia = header_improvements_aiter(peer_manager, blockchain_view, block_batcher, count)
+        caught_up_peers = set()
+        async for peer, block_index, hashes in hia:
+            if len(hashes) == 0:
+                #caught_up_peers.add(peer)
+                if len(caught_up_peers) >= count:
+                    break
+            yield peer, block_index, hashes
+        limiting_remote_host_aiter.stop()
 
-    async for idx, f in preload_aiter(1500, block_batcher.block_futures_for_header_info_aiter(hi_aiter)):
+    async for idx, f in preload_aiter(2500, block_batcher.block_futures_for_header_info_aiter(
+            header_improvements(peer_manager, blockchain_view, block_batcher))):
         peer, block = await f
         yield peer, block, idx
+    await peer_manager.close_all()
+    await block_batcher.join()
 
 
 def main():
@@ -96,7 +102,9 @@ def main():
         loop = asyncio.get_event_loop()
         loop.run_until_complete(collect_blocks(network))
     finally:
+        logging.debug("waiting for shutdown_asyncgens")
         loop.run_until_complete(loop.shutdown_asyncgens())
+        logging.debug("done waiting for shutdown_asyncgens")
 
 
 if __name__ == "__main__":

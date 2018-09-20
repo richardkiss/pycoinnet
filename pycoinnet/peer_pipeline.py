@@ -34,7 +34,7 @@ def make_peer_handshake_map_filter(network, version_dict):
     return peer_handshake
 
 
-def make_remote_host_aiter(
+def make_handshaked_peer_aiter(
     network, host_aiter, tcp_connect_workers=30, handshake_workers=3, version_dict={}):
     """
     host_aiter: async iter of (host, port) values

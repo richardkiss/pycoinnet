@@ -68,6 +68,15 @@ class push_aiter_head:
 
 
 class push_aiter:
+    """
+    An asynchronous iterator based on a linked-list.
+    Data goes in the head via "push".
+    Allows peeking to determine how many elements are ready.
+    Can be copied very cheaply by copying the tail.
+    Has an "preflight" that is called whenever __anext__ is called.
+    The __anext__ method is wrapped with a semaphore so multiple
+    tasks can use the same iterator and each will only get an output once.
+    """
     def __init__(self, tail=None, next_preflight=None):
         if tail is None:
             tail = asyncio.Future()
@@ -137,7 +146,8 @@ def aiter_forker(aiter):
     async def worker(open_aiter, pa):
         try:
             _ = await open_aiter.__anext__()
-            pa.push(_)
+            if not pa.is_stopped():
+                pa.push(_)
         except StopAsyncIteration:
             pa.stop()
 
@@ -267,6 +277,19 @@ async def active_aiter(aiter):
     await task
 
 
+class sharable_aiter:
+    def __init__(self, aiter):
+        self._opened_aiter = aiter.__aiter__()
+        self._semaphore = asyncio.Semaphore()
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        async with self._semaphore:
+            return await self._opened_aiter.__anext__()
+
+
 class gated_aiter:
     """
     Returns a pair: an iter along with a function that you can "push"
@@ -277,14 +300,19 @@ class gated_aiter:
     """
     def __init__(self, aiter):
         self._gate = push_aiter()
-        self._aiter = active_aiter(azip(aiter, map_filter_aiter(range, self._gate)))
+        self._open_aiter = active_aiter(azip(aiter, map_filter_aiter(range, self._gate))).__aiter__()
+        self._semaphore = asyncio.Semaphore()
 
-    async def __aiter__(self):
-        async for _ in self._aiter:
-            yield _[0]
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        async with self._semaphore:
+            return (await self._open_aiter.__anext__())[0]
 
     def push(self, count):
-        self._gate.push(count)
+        if not self._gate.is_stopped():
+            self._gate.push(count)
 
     def stop(self):
         self._gate.stop()
@@ -308,15 +336,16 @@ class stoppable_aiter:
     def __init__(self, aiter):
         self._open_aiter = aiter.__aiter__()
         self._is_stopping = False
+        self._semaphore = asyncio.Semaphore()
 
     def __aiter__(self):
         return self
 
-    async def __aiter__(self):
-        async for _ in self._open_aiter:
-            yield _
-            if self._is_stopping:
-                break
+    async def __anext__(self):
+        if self._is_stopping:
+            raise StopAsyncIteration
+        async with self._semaphore:
+            return await self._open_aiter.__anext__()
 
     def stop(self):
         self._is_stopping = True
