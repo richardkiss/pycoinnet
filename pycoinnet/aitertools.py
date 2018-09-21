@@ -6,6 +6,11 @@ import weakref
 async def azip(*aiters):
     """
     async version of zip
+    This function takes a list of async iterators and returns a single async iterator
+    that yields tuples of elements.
+
+    Obviously this iterator advances as slow its slowest component.
+
     example:
         async for a, b, c in azip(aiter1, aiter2, aiter3):
             print(a, b, c)
@@ -173,22 +178,28 @@ async def join_aiters(aiter_of_aiters):
 
     async def aiter_to_next_job(aiter):
         """
-        Return items to add to stack, plus jobs to add to queue.
+        Return two lists: a list of items to yield, and a list of jobs to add to queue.
         """
         try:
-            v = await aiter.__anext__()
-            return [v], [asyncio.ensure_future(aiter_to_next_job(aiter))]
+            items = [await aiter.__anext__()]
+            jobs = [asyncio.ensure_future(aiter_to_next_job(aiter))]
         except StopAsyncIteration:
-            return [], []
+            items = jobs = []
+        return items, jobs
 
     async def main_aiter_to_next_job(aiter_of_aiters):
+        """
+        Return two lists: a list of items to yield, and a list of jobs to add to queue.
+        """
         try:
+            items = []
             new_aiter = await aiter_of_aiters.__anext__()
-            return [], [
+            jobs = [
                 asyncio.ensure_future(aiter_to_next_job(new_aiter.__aiter__())),
                 asyncio.ensure_future(main_aiter_to_next_job(aiter_of_aiters))]
         except StopAsyncIteration:
-            return [], []
+            jobs = []
+        return items, jobs
 
     jobs = set([main_aiter_to_next_job(aiter_of_aiters.__aiter__())])
 
@@ -253,8 +264,27 @@ async def map_filter_aiter(map_f, aiter):
             logging.exception("unhandled mapping function %s worker exception on %s", map_f, _)
 
 
+class sharable_aiter:
+    """
+    Not all iterators can have multiple consumers. For example, asynchronous
+    generators don't allow it. But if you wrap it with one of these,
+    you'll be okay.
+    """
+
+    def __init__(self, aiter):
+        self._opened_aiter = aiter.__aiter__()
+        self._semaphore = asyncio.Semaphore()
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        async with self._semaphore:
+            return await self._opened_aiter.__anext__()
+
+
 def parallel_map_aiter(map_f, worker_count, aiter, q=None, maxsize=1):
-    shared_aiter = aiter_forker(aiter)
+    shared_aiter = sharable_aiter(aiter)
     aiters = [map_aiter(map_f, shared_aiter) for _ in range(worker_count)]
     return join_aiters(iter_to_aiter(aiters))
 
@@ -275,19 +305,6 @@ async def active_aiter(aiter):
     async for _ in q:
         yield _
     await task
-
-
-class sharable_aiter:
-    def __init__(self, aiter):
-        self._opened_aiter = aiter.__aiter__()
-        self._semaphore = asyncio.Semaphore()
-
-    def __aiter__(self):
-        return self
-
-    async def __anext__(self):
-        async with self._semaphore:
-            return await self._opened_aiter.__anext__()
 
 
 class gated_aiter:

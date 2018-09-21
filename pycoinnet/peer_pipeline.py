@@ -53,27 +53,6 @@ def make_handshaked_peer_aiter(
     return handshaked_peer_aiter
 
 
-def peer_address_to_hostport(peer_address, default_port):
-    if "/" in peer_address:
-        host, port = peer_address.split("/", 1)
-        port = int(port)
-        return host, port
-    return peer_address, default_port
-
-
-def peer_addresses_to_host_aiter(network, peer_addresses=[]):
-    if peer_addresses:
-        hostports = [peer_address_to_hostport(_, network.default_port) for _ in peer_addresses]
-        return iter_to_aiter(hostports)
-    return dns_bootstrap_host_port_aiter(network)
-
-
-def get_peer_iterator(network, peer_addresses=[]):
-    # BRAIN DAMAGE: 70016 version number is required for bgold new block header format
-    host_aiter = peer_addresses_to_host_aiter(network, peer_addresses)
-    return make_remote_host_aiter(network, host_aiter, version_dict=dict(version=70016))
-
-
 # events
 async def perform_handshake(peer, **version_msg):
     """
