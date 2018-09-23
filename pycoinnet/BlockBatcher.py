@@ -4,8 +4,6 @@ import weakref
 
 from pycoin.message.InvItem import InvItem, ITEM_TYPE_BLOCK
 
-from .aitertools import map_filter_aiter
-
 
 class BlockBatcher:
     def __init__(self, peer_manager):
@@ -34,13 +32,15 @@ class BlockBatcher:
         results = []
         for _, block_header in enumerate(block_headers):
             block_index = first_block_index + _
-            results.append((block_index, await self._add_to_download_queue(block_header.hash(), block_index)))
+            results.append(
+                (block_index, await self._add_to_download_queue(block_header.hash(), block_index)))
         return results
 
     async def block_futures_for_header_info_aiter(self, header_info_aiter):
         async for peer, block_index, block_headers in header_info_aiter:
             for _, block_header in enumerate(block_headers):
-                yield block_index + _, await self._add_to_download_queue(block_header.hash(), block_index + _)
+                yield block_index + _, await self._add_to_download_queue(
+                    block_header.hash(), block_index + _)
         #await self._event_task
 
     async def _add_to_download_queue(self, block_hash, block_index):
@@ -56,7 +56,7 @@ class BlockBatcher:
         subtasks = set()
         async for peer in self._peer_aiter:
             NODE_NETWORK = 1
-            if 1: #peer.version["services"] & NODE_NETWORK:
+            if peer.version["services"] & NODE_NETWORK:
                 # make two "fetch" tasks
                 subtasks.update([asyncio.ensure_future(self._peer_batch_task(peer)) for _ in range(2)])
         if subtasks:
@@ -112,7 +112,7 @@ class BlockBatcher:
                 futures.append(f)
             start_time = loop.time()
             peer.send_msg("getdata", items=inv_items)
-            loop.call_later(10, self._timeout_batch, batch)
+            loop.call_later(10, self._timeout_batch, batch, peer)
             done, pending = await asyncio.wait(futures)
             total_time = loop.time() - start_time
             if not total_time:
@@ -123,21 +123,23 @@ class BlockBatcher:
                 int(target_batch_time * item_per_unit_time + 0.5))
             desired_batch_size = min(max(1, desired_batch_size), max_batch_size)
             # BRAIN DAMAGE: we shouldn't punish for retries since the original request may
-            # finally respond            
+            # finally respond
             got_all = all(_.result()[0] == peer for _ in done)
             if not got_all:
                 logging.info("peer %s didn't respond to all requests, sleeping for 60 s", peer)
-                await asyncio.wait([peer.wait_until_close(), asyncio.sleep(60)], return_when=asyncio.FIRST_COMPLETED)
+                await asyncio.wait(
+                    [peer.wait_until_close(), asyncio.sleep(60)], return_when=asyncio.FIRST_COMPLETED)
             logging.debug("new batch size for %s is %d", peer, desired_batch_size)
         logging.debug("ending _peer_batch_task for %s", peer)
 
-    def _timeout_batch(self, batch):
+    def _timeout_batch(self, batch, peer):
         readd_list = []
         for (priority, block_hash, f, peers_tried) in batch:
             if not f.done():
                 readd_list.append((priority, block_hash, f, peers_tried))
         if readd_list:
-            logging.info("requeuing %d items starting with %s", len(readd_list), readd_list[0][0])
+            logging.info(
+                "requeuing %d items starting with %s from %s", len(readd_list), readd_list[0][0], peer)
             for _ in readd_list:
                 self._inv_item_future_queue.put_nowait(_)
 

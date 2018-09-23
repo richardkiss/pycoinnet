@@ -13,7 +13,8 @@ def event_aiter_from_peer_aiter(peer_aiter):
 
 
 class PeerManager:
-    def __init__(self, peer_aiter):
+    def __init__(self, peer_aiter, host_gate_aiter):
+        self._host_gate_aiter = host_gate_aiter
         self._active_peers = set()
         self._peer_aiter_forker = aiter_forker(peer_aiter)
         self._event_aiter_forker = aiter_forker(event_aiter_from_peer_aiter(self.new_peer_aiter()))
@@ -27,6 +28,7 @@ class PeerManager:
             await peer.wait_until_close()
 
     async def close_all(self):
+        self._host_gate_aiter.stop()
         async for peer in self.new_peer_aiter():
             peer.close()
         await self._watcher_task

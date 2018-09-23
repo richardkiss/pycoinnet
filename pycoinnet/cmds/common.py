@@ -2,7 +2,7 @@ import asyncio
 import logging
 import os.path
 
-from pycoinnet.aitertools import push_aiter, join_aiters, map_aiter, sharable_aiter, iter_to_aiter, gated_aiter
+from pycoinnet.aitertools import push_aiter, join_aiters, sharable_aiter, iter_to_aiter, gated_aiter
 from pycoinnet.dnsbootstrap import dns_bootstrap_host_port_aiter
 from pycoinnet.BlockChainView import BlockChainView
 from pycoinnet.PeerManager import PeerManager
@@ -60,6 +60,10 @@ def peer_address_to_hostport(peer_address, default_port):
     return peer_address, default_port
 
 
+def host_port_aiter_for_addresses(peer_addresses, default_port):
+    return iter_to_aiter([peer_address_to_hostport(_, default_port) for _ in peer_addresses])
+
+
 def peer_addresses_to_host_aiter(network, peer_addresses=[]):
     if peer_addresses:
         hostports = [peer_address_to_hostport(_, network.default_port) for _ in peer_addresses]
@@ -67,25 +71,35 @@ def peer_addresses_to_host_aiter(network, peer_addresses=[]):
     return dns_bootstrap_host_port_aiter(network)
 
 
+async def allow_entries(rate_limiter, delay_between=5.0):
+    while True:
+        logging.info("allowing host info into connection queue")
+        rate_limiter.push(1)
+        await asyncio.sleep(delay_between)
+
+
 async def peer_lifecycle(remote_peer_aiter, rate_limiter):
-    rate_limiter.push(1)
+    task = asyncio.ensure_future(allow_entries(rate_limiter))
     async for peer in remote_peer_aiter:
+        task.cancel()
         logging.info("connected to %s", peer)
         yield peer
         await peer.wait_until_close()
         logging.info("close connection to %s", peer)
-        rate_limiter.push(1)
+        task = asyncio.ensure_future(allow_entries(rate_limiter))
+    task.cancel()
 
 
-def peer_manager_for_host_port_aiter(network, remote_host_aiter, count=8):
-
+def peer_manager_for_host_port_aiter(network, host_port_aiter, count=8):
+    gated_host_port_aiter = gated_aiter(host_port_aiter)
     handshaked_peer_aiter = sharable_aiter(make_handshaked_peer_aiter(
-        network, remote_host_aiter, version_dict=dict(version=70016)))
+        network, gated_host_port_aiter, version_dict=dict(version=70016)))
+    connected_remote_aiter = sharable_aiter(join_aiters(iter_to_aiter([
+        peer_lifecycle(handshaked_peer_aiter, gated_host_port_aiter) for _ in range(count)])))
 
-    connected_remote_aiter = join_aiters(iter_to_aiter([
-        peer_lifecycle(handshaked_peer_aiter, remote_host_aiter) for _ in range(count)]))
-
-    return PeerManager(connected_remote_aiter)
+    peer_manager = PeerManager(connected_remote_aiter, gated_host_port_aiter)
+    peer_manager.pong_task = create_pong_task(peer_manager)
+    return peer_manager
 
 
 def peer_manager_for_args(args, bloom_filter=None):
@@ -94,8 +108,12 @@ def peer_manager_for_args(args, bloom_filter=None):
     count = getattr(args, "count", 4)
 
     host_port_aiter_of_aiters = push_aiter()
-    host_port_aiter_of_aiters.push(peer_addresses_to_host_aiter(network, args.peer))
+    if args.peer:
+        host_port_aiter_of_aiters.push(host_port_aiter_for_addresses(args.peer, network.default_port))
+    else:
+        host_port_aiter_of_aiters.push(dns_bootstrap_host_port_aiter(network))
     host_port_aiter_of_aiters.stop()
+
     host_port_aiter = join_aiters(host_port_aiter_of_aiters)
 
     if bloom_filter and 0:
@@ -109,9 +127,4 @@ def peer_manager_for_args(args, bloom_filter=None):
                               hash_function_count=hash_function_count, flags=flags)
             return peer
 
-        peer_iterator = map_aiter(got_new_peer, peer_iterator)
-
-    gated_host_aiter = gated_aiter(host_port_aiter)
-    peer_manager = peer_manager_for_host_port_aiter(network, gated_host_aiter, count)
-    peer_manager.pong_task = create_pong_task(peer_manager)
-    return peer_manager
+    return peer_manager_for_host_port_aiter(network, host_port_aiter, count)

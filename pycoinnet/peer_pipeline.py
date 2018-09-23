@@ -1,8 +1,7 @@
 import asyncio
 import logging
 
-from pycoinnet.aitertools import iter_to_aiter, parallel_map_aiter, flatten_aiter
-from pycoinnet.dnsbootstrap import dns_bootstrap_host_port_aiter
+from pycoinnet.aitertools import parallel_map_aiter, flatten_aiter
 from pycoinnet.Peer import Peer
 from pycoinnet.version import version_data_for_peer
 
@@ -35,7 +34,7 @@ def make_peer_handshake_map_filter(network, version_dict):
 
 
 def make_handshaked_peer_aiter(
-    network, host_aiter, tcp_connect_workers=30, handshake_workers=3, version_dict={}):
+        network, host_aiter, tcp_connect_workers=30, handshake_workers=3, version_dict={}):
     """
     host_aiter: async iter of (host, port) values
     connected_host_aiter: async iter of (reader, writer) values

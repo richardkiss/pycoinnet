@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import weakref
 
 
 async def azip(*aiters):
@@ -295,6 +294,7 @@ async def active_aiter(aiter):
     and puts them into a push_q.
     """
     q = push_aiter()
+
     async def _pull_task(aiter):
         async for _ in aiter:
             q.push(_)
