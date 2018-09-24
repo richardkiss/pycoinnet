@@ -36,11 +36,15 @@ class BlockBatcher:
                 (block_index, await self._add_to_download_queue(block_header.hash(), block_index)))
         return results
 
-    async def block_futures_for_header_info_aiter(self, header_info_aiter):
+    async def block_futures_for_header_info_aiter(self, header_info_aiter, skip_date):
         async for peer, block_index, block_headers in header_info_aiter:
             for _, block_header in enumerate(block_headers):
-                yield block_index + _, await self._add_to_download_queue(
-                    block_header.hash(), block_index + _)
+                if block_header.timestamp >= skip_date:
+                    f = await self._add_to_download_queue(block_header.hash(), block_index + _)
+                else:
+                    f = asyncio.Future()
+                    f.set_result((peer, block_header))
+                yield block_index + _, f
         #await self._event_task
 
     async def _add_to_download_queue(self, block_hash, block_index):
