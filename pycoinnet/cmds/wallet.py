@@ -27,6 +27,7 @@ from pycoin.coins.tx_utils import create_tx
 
 from pycoinnet.BlockChainView import BlockChainView
 from pycoinnet.blockcatchup import fetch_blocks_after
+from pycoinnet.merkleblock_handler import fetch_merkleblocks_after
 
 from .MultisigKey import parse_MultisigKey
 
@@ -462,6 +463,10 @@ def block_iterator(args, wallet):
             return ITEM_TYPE_MERKLEBLOCK if args.spv else ITEM_TYPE_BLOCK
 
     peer_count = len(args.peer) or 8
+
+    if args.spv:
+        return fetch_merkleblocks_after(peer_manager, wallet.blockchain_view(), peer_count, early_timestamp)
+
     return fetch_blocks_after(peer_manager, wallet.blockchain_view(), peer_count, early_timestamp)
 
 

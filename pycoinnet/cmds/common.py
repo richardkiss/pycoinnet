@@ -2,7 +2,7 @@ import asyncio
 import logging
 import os.path
 
-from pycoinnet.aitertools import push_aiter, join_aiters, sharable_aiter, iter_to_aiter, gated_aiter
+from pycoinnet.aitertools import push_aiter, join_aiters, sharable_aiter, iter_to_aiter, gated_aiter, map_aiter
 from pycoinnet.dnsbootstrap import dns_bootstrap_host_port_aiter
 from pycoinnet.BlockChainView import BlockChainView
 from pycoinnet.PeerManager import PeerManager
@@ -107,6 +107,9 @@ def peer_manager_for_args(args, bloom_filter=None):
     network = args.network
     count = getattr(args, "count", 4)
 
+    if args.spv:
+        return peer_manager_for_args_with_bloom(network, args.peer, bloom_filter)
+
     host_port_aiter_of_aiters = push_aiter()
     if args.peer:
         host_port_aiter_of_aiters.push(host_port_aiter_for_addresses(args.peer, network.default_port))
@@ -116,15 +119,27 @@ def peer_manager_for_args(args, bloom_filter=None):
 
     host_port_aiter = join_aiters(host_port_aiter_of_aiters)
 
-    if bloom_filter and 0:
-        # BRAIN DAMAGE: bloom filter doesn't work
-        filter_bytes, hash_function_count, tweak = bloom_filter.filter_load_params()
-        flags = 1  # BLOOM_UPDATE_ALL = 1  # BRAIN DAMAGE
-
-        async def got_new_peer(peer):
-            if args.spv:
-                peer.send_msg("filterload", filter=filter_bytes, tweak=tweak,
-                              hash_function_count=hash_function_count, flags=flags)
-            return peer
-
     return peer_manager_for_host_port_aiter(network, host_port_aiter, count)
+
+
+def peer_manager_for_args_with_bloom(network, host_address, bloom_filter):
+
+    host_port_aiter = host_port_aiter_for_addresses(host_address, network.default_port)
+    gated_host_port_aiter = gated_aiter(host_port_aiter)
+    handshaked_peer_aiter = sharable_aiter(make_handshaked_peer_aiter(
+        network, gated_host_port_aiter, version_dict=dict(version=70016)))
+    connected_remote_aiter = join_aiters(iter_to_aiter([peer_lifecycle(handshaked_peer_aiter, gated_host_port_aiter)]))
+    flags = 1  # BLOOM_UPDATE_ALL = 1  # BRAIN DAMAGE
+
+    filter_bytes, hash_function_count, tweak = bloom_filter.filter_load_params()
+
+    def filter(peer):
+        peer.send_msg("filterload", filter=filter_bytes, tweak=tweak,
+                      hash_function_count=hash_function_count, flags=flags)
+        return peer
+
+    setup_remote_aiter = map_aiter(filter, connected_remote_aiter)
+
+    peer_manager = PeerManager(setup_remote_aiter, gated_host_port_aiter)
+    peer_manager.pong_task = create_pong_task(peer_manager)
+    return peer_manager

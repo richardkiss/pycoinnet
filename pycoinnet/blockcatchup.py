@@ -7,16 +7,6 @@ from pycoinnet.header_improvements import header_improvements_aiter
 from .BlockBatcher import BlockBatcher
 
 
-async def peer_lifecycle(remote_peer_aiter, rate_limiter):
-    rate_limiter.push(1)
-    async for peer in remote_peer_aiter:
-        logging.info("connected to %s", peer)
-        yield peer
-        await peer.wait_until_close()
-        logging.info("close connection to %s", peer)
-        rate_limiter.push(1)
-
-
 async def blockcatchup(peer_manager, blockchain_view, count, skip_date):
 
     block_batcher = BlockBatcher(peer_manager)

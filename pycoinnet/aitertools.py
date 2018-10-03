@@ -309,9 +309,8 @@ async def active_aiter(aiter):
 
 class gated_aiter:
     """
-    Returns a pair: an iter along with a function that you can "push"
-    integer values into. When a number is pushed, that many items are
-    allowed out through the gate.
+    Returns an aiter that you can "push" integer values into.
+    When a number is pushed, that many items are allowed out through the gate.
 
     This is kind of like a discrete version of an electronic transistor.
     """
