@@ -2,8 +2,8 @@ import asyncio
 import logging
 import weakref
 
+from aiter import q_aiter, map_aiter, parallel_map_aiter, flatten_aiter
 from pycoin.message.InvItem import InvItem, ITEM_TYPE_TX, ITEM_TYPE_BLOCK, ITEM_TYPE_MERKLEBLOCK
-from pycoinnet.aitertools import q_aiter, map_aiter, parallel_map_aiter, flatten_aiter
 
 
 class InvBatcher:

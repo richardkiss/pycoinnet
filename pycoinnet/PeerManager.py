@@ -1,6 +1,6 @@
 import asyncio
 
-from pycoinnet.aitertools import aiter_forker, iter_to_aiter, join_aiters, map_aiter
+from aiter import aiter_forker, iter_to_aiter, join_aiters, map_aiter
 
 
 def event_aiter_from_peer_aiter(peer_aiter):

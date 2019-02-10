@@ -1,6 +1,6 @@
 import asyncio
 
-from .aitertools import iter_to_aiter, map_aiter, flatten_aiter
+from aiter import iter_to_aiter, map_aiter, flatten_aiter
 
 
 def dns_bootstrap_host_port_aiter(network, getaddrinfo=asyncio.get_event_loop().getaddrinfo):

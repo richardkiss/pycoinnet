@@ -2,7 +2,8 @@ import asyncio
 import logging
 import os.path
 
-from pycoinnet.aitertools import push_aiter, join_aiters, sharable_aiter, iter_to_aiter, gated_aiter, map_aiter
+from aiter import push_aiter, join_aiters, sharable_aiter, iter_to_aiter, gated_aiter, map_aiter
+
 from pycoinnet.dnsbootstrap import dns_bootstrap_host_port_aiter
 from pycoinnet.BlockChainView import BlockChainView
 from pycoinnet.PeerManager import PeerManager

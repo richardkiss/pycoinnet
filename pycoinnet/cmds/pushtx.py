@@ -2,10 +2,10 @@ import argparse
 import asyncio
 import logging
 
+from aiter import push_aiter, join_aiters, sharable_aiter
 from pycoin.message.InvItem import InvItem, ITEM_TYPE_TX
 from pycoin.networks.registry import network_for_netcode
 
-from pycoinnet.aitertools import push_aiter, join_aiters, sharable_aiter
 from pycoinnet.cmds.common import (
     init_logging, peer_manager_for_host_port_aiter, host_port_aiter_for_addresses
 )

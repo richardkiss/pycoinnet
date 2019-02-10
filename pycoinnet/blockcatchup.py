@@ -1,6 +1,6 @@
 import logging
 
-from pycoinnet.aitertools import preload_aiter, aiter_to_iter
+from aiter import preload_aiter, aiter_to_iter
 
 from pycoinnet.header_improvements import header_improvements_aiter
 

@@ -1,5 +1,6 @@
 import logging
-from pycoinnet.aitertools import iter_to_aiter, push_aiter, join_aiters, gated_aiter, stoppable_aiter
+
+from aiter import iter_to_aiter, push_aiter, join_aiters, gated_aiter, stoppable_aiter
 
 
 async def monitor_improvements(peer_manager, blockchain_view, block_batcher):

@@ -1,7 +1,8 @@
 import asyncio
 import logging
 
-from pycoinnet.aitertools import parallel_map_aiter, flatten_aiter
+from aiter import parallel_map_aiter, flatten_aiter
+
 from pycoinnet.Peer import Peer
 from pycoinnet.version import version_data_for_peer
 

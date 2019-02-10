@@ -1,8 +1,8 @@
 import logging
 
+from aiter import aiter_to_iter
 from pycoin.message.InvItem import InvItem, ITEM_TYPE_MERKLEBLOCK
 
-from pycoinnet.aitertools import aiter_to_iter
 from pycoinnet.header_improvements import header_improvements_aiter
 
 from .BlockBatcher import BlockBatcher

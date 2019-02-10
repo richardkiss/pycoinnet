@@ -1,7 +1,7 @@
 import asyncio
 import logging
 
-from pycoinnet.aitertools import (
+from aiter import (
     iter_to_aiter, push_aiter, join_aiters, gated_aiter, map_aiter, azip
 )
 
