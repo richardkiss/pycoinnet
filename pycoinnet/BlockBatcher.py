@@ -143,7 +143,8 @@ class BlockBatcher:
                 readd_list.append((priority, block_hash, f, peers_tried))
         if readd_list:
             logging.info(
-                "requeuing %d items starting with %s from %s", len(readd_list), readd_list[0][0], peer)
+                "requeuing %d items starting with %s (%s) from %s",
+                len(readd_list), readd_list[0][0], readd_list[0][1], peer)
             for _ in readd_list:
                 self._inv_item_future_queue.put_nowait(_)
 
@@ -157,6 +158,7 @@ class BlockBatcher:
             if block_hash in self._block_hash_to_future:
                 f = self._block_hash_to_future[block_hash]
                 if not f.done():
+                    logging.debug("setting future for block %s from %s", block.id(), peer)
                     f.set_result((peer, block))
             else:
                 logging.error("missing future for block %s from %s", block.id(), peer)
