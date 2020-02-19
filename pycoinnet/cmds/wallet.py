@@ -656,7 +656,7 @@ def create_parser():
     parser.add_argument('-n', "--network", help='specify network', type=network_for_netcode,
                         default=network_for_netcode("BTC"))
     parser.add_argument('-w', '--wallet_name', help='The name of the wallet.', default="default")
-    subparsers = parser.add_subparsers(help="commands", dest='command')
+    subparsers = parser.add_subparsers(help="commands", dest='command', required=True)
 
     fetch_parser = subparsers.add_parser('fetch', help='Update to current blockchain view')
     fetch_parser.add_argument('-d', "--date", help="Skip ahead to this date.",
