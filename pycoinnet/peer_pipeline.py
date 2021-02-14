@@ -67,6 +67,10 @@ async def perform_handshake(peer, **version_msg):
     if msg != 'version':
         return None
 
+    # send "wtxidrelay" if version >= 70016
+    if version_data["version"] >= 70016:
+        peer.send_msg("wtxidrelay")
+
     # "verack"
     peer.send_msg("verack")
     event = await peer.next_message()
