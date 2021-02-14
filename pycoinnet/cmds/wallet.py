@@ -33,6 +33,11 @@ from .MultisigKey import parse_MultisigKey
 from .common import init_logging, peer_manager_for_args
 
 
+def monkeypatch_parser_and_packer():
+    from pycoin.message.make_parser_and_packer import STANDARD_P2P_MESSAGES
+    STANDARD_P2P_MESSAGES["wtxidrelay"] = ""
+
+
 class DB:
     def __init__(self, path):
         self._path = path
@@ -725,6 +730,7 @@ def create_parser():
 
 
 def main():
+    monkeypatch_parser_and_packer()
     init_logging()
     parser = create_parser()
 
