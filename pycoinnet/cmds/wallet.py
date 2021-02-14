@@ -20,7 +20,6 @@ from pycoin.encoding.hash import hash160
 from pycoin.encoding.hexbytes import b2h_rev
 from pycoin.key.Keychain import Keychain
 from pycoin.encoding.hexbytes import b2h, h2b, h2b_rev
-from pycoin.ui.validate import is_address_valid
 from pycoin.networks.registry import network_for_netcode
 from pycoin.message.InvItem import ITEM_TYPE_BLOCK, ITEM_TYPE_MERKLEBLOCK
 from pycoin.coins.tx_utils import create_tx
@@ -194,23 +193,51 @@ class InterestFinder:
         self._keychain = Keychain(sqlite3.connect(path))
         self._multisig_key = multisig_key
 
-    def interesting_blobs_from_script(self, script):
-        interesting = []
-        for opcode, data, pc, new_pc in self._network.script_tools.get_opcodes(script):
-            if data and self.blob_is_interesting(script, data):
-                interesting.append(data)
-        return interesting
+    def interesting_data_for_spendable(self, spendable):
+        script_info = self._network.contract.info_for_script(spendable.script)
+        data = None
+        t = script_info["type"]
+        if t in ("p2pkh", "p2sh", "p2pkh_wit"):
+            data = script_info["hash160"]
+        elif t == "nulldata":
+            data = script_info["data"]
+        elif t == "p2sh_wit":
+            # TK look at hash256
+            # {'type': 'p2sh_wit', 'hash256': xxxxxx}
+            data = None
+        elif t == "p2pk":
+            data = script_info["sec"]
+            data = hash160(data)
+        elif t == "multisig":
+            data = None
+            # TK:  {'type': 'multisig', 'sec_keys': [xxx, xxx], 'm': 1}
+        elif t == "unknown":
+            logging.info("unknown spendable with script: %s", script_info["script"])
+        else:
+            print(script_info)
+            breakpoint()
+        if data and data in self._hash160_set or self._keychain.path_for_hash160(data) or self._keychain.p2s_for_hash(data):
+            return data
+        return None
 
-    def blob_is_interesting(self, script, data):
-        if data in self._hash160_set:
-            return True
-        r = self._keychain.path_for_hash160(data)
-        if r:
-            return True
-        r = self._keychain.p2s_for_hash(data)
-        if r:
-            return True
-        return False
+    if 0:
+        def interesting_blobs_from_script(self, script):
+            interesting = []
+            for opcode, data, pc, new_pc in self._network.script_tools.get_opcodes(script):
+                if data and self.blob_is_interesting(script, data):
+                    interesting.append(data)
+            return interesting
+
+        def blob_is_interesting(self, script, data):
+            if data in self._hash160_set:
+                return True
+            r = self._keychain.path_for_hash160(data)
+            if r:
+                return True
+            r = self._keychain.p2s_for_hash(data)
+            if r:
+                return True
+            return False
 
     def hash160_set(self):
         s = set(self._hash160_set)
@@ -367,9 +394,9 @@ class Wallet:
                 if spendable:
                     spent_spendables.append(spendable)
             for spendable in tx.tx_outs_as_spendable():
-                r = self._interest_finder.interesting_blobs_from_script(spendable.script)
-                if r:
-                    new_spendables_and_blobs.append([spendable, r])
+                data = self._interest_finder.interesting_data_for_spendable(spendable)
+                if data:
+                    new_spendables_and_blobs.append([spendable, data])
         return new_spendables_and_blobs, spent_spendables
 
     def process_block(self, block, block_index, txs, blockchain_view):
@@ -515,7 +542,7 @@ def as_payable(payable, network):
     if "/" in payable:
         address, amount = payable.split("/", 1)
         amount = int(amount)
-    if not is_address_valid(address, allowable_netcodes=[network.symbol]):
+    if not network.parse.address(address):
         raise argparse.ArgumentTypeError("%s is not a valid address" % address)
     if amount:
         return (address, amount)

@@ -22,8 +22,8 @@ def make_peer_handshake_map_filter(network, version_dict):
     async def peer_handshake(reader_writer):
         reader, writer = reader_writer
         peer = Peer(
-            reader, writer, network.magic_header, network.parse_message,
-            network.pack_message, max_msg_size=10*1024*1024)
+            reader, writer, network.magic_header, network.message.parse,
+            network.message.pack, max_msg_size=10*1024*1024)
         version_data = version_data_for_peer(peer, **version_dict)
         peer.version = await perform_handshake(peer, **version_data)
         if peer.version is None:
