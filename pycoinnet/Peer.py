@@ -70,7 +70,7 @@ class Peer:
                 transmitted_hash = message_size_hash_bytes[16:20]
                 message_data = await reader.readexactly(size)
                 self._bytes_read += size
-        except asyncio.streams.IncompleteReadError:
+        except asyncio.IncompleteReadError:
             return None
 
         # check the hash

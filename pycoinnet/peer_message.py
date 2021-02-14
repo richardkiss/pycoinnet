@@ -50,7 +50,7 @@ def make_reader_to_peer_stream(magic_header):
                     logging.debug("message %s (%d byte payload)", message_name, len(message_data))
                     yield dict(name=message_name, data=message_data, writer=writer)
 
-                except asyncio.streams.IncompleteReadError:
+                except asyncio.IncompleteReadError:
                     break
 
         return event_stream()
