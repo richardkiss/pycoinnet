@@ -79,7 +79,7 @@ class Peer:
             logging.error("checksum is WRONG: %s instead of %s" % (
                 binascii.hexlify(actual_hash), binascii.hexlify(transmitted_hash)))
             return None
-        logging.debug("message %s: %s (%d byte payload)", self, message_name, len(message_data))
+        logging.debug("received message %s from %s  (%d byte payload)", message_name, self, len(message_data))
         if unpack_to_dict:
             message_data = self._parse_from_data(message_name, message_data)
         return message_name, message_data
