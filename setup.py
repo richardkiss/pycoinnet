@@ -11,14 +11,11 @@ setup(
     version=version,
     packages=[
         "pycoinnet",
-        "pycoinnet.examples",
-        "pycoinnet.helpers",
-        "pycoinnet.peer",
-        "pycoinnet.peergroup",
-        "pycoinnet.util",
+        "pycoinnet.cmds",
     ],
     entry_points={'console_scripts': [
-        'blockwatcher = pycoinnet.examples.blockwatcher:main',
+        'wallet = pycoinnet.cmds.wallet:main',
+        'pushtx = pycoinnet.cmds.pushtx:main',
     ]},
     install_requires=REQUIREMENTS,
     author="Richard Kiss",
