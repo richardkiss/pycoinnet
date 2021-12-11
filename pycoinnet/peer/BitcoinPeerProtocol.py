@@ -55,6 +55,7 @@ class BitcoinPeerProtocol(asyncio.Protocol):
         q.filter_f = filter_f
         self.message_queues.add(q)
 
+        @asyncio.coroutine
         def get_next_message():
             msg_name, data = yield from q.get()
             if msg_name is None:
