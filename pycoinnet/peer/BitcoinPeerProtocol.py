@@ -55,6 +55,7 @@ class BitcoinPeerProtocol(asyncio.Protocol):
         q.filter_f = filter_f
         self.message_queues.add(q)
 
+        @asyncio.coroutine
         def get_next_message():
             msg_name, data = yield from q.get()
             if msg_name is None:
@@ -74,7 +75,11 @@ class BitcoinPeerProtocol(asyncio.Protocol):
         gives an easy way to keep a strong reference to a Task that won't
         disappear until the peer does.
         """
-        self._tasks.add(asyncio.async(task))
+        try:
+            self._tasks.add(asyncio.ensure_future(task))
+        except AttributeError:
+            # compatibility for very old versions of python 3
+            self._tasks.add(getattr(asyncio, 'async')(task))
 
     def send_msg(self, message_name, **kwargs):
         message_data = pack_from_data(message_name, **kwargs)

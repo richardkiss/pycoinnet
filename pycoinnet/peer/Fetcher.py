@@ -22,6 +22,7 @@ class Fetcher:
             filter_f=lambda name, data: name in ["tx", "block", "merkleblock", "notfound"])
         peer.add_task(self._fetch_loop(next_message, getdata_loop_future))
 
+    @asyncio.coroutine
     def fetch(self, inv_item, timeout=None):
         """
         Return the fetched object or None if the remote says it doesn't have it, or
